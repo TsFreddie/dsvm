@@ -1,0 +1,35 @@
+{
+  "name": "dsvm",
+  "version": "0.1.0",
+  "description": "Version manager and service runner for @deepseek-ai/dsh",
+  "type": "module",
+  "bin": {
+    "dsvm": "bin/dsvm.js"
+  },
+  "files": [
+    "bin",
+    "build/src",
+    "README.md",
+    "README.zh.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"build/test/*.test.js\"",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek",
+    "version-manager",
+    "systemd",
+    "launchd"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

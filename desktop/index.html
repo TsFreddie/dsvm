@@ -36,11 +36,12 @@
 </head>
 <body>
   <!--
-    dsh 以嵌入方式展示（iframe），而不是顶层跳转：
+    dsh 以 <webview> 嵌入展示，而不是顶层跳转或 iframe：
     顶层跳转会卸载本页，导致拿不到跳转状态、重试逻辑一并丢失；
-    嵌入则让本页常驻，可以探测服务状态、覆盖连接中/失败态并自动重试。
+    webview 跑在独立进程，默认不带 Node，与应用互相隔离，
+    还提供 loadabort（真实失败原因）与 newwindow（可转外部浏览器）事件。
   -->
-  <iframe id="view" title="dsh" nwdisable nwfaketop hidden></iframe>
+  <webview id="view" partition="persist:dsvm-desktop" hidden></webview>
 
   <div id="overlay">
     <div class="card" id="connecting">
@@ -54,7 +55,7 @@
       <pre>dsvm service install   # 注册后台服务定义（默认端口 7766）
 dsvm service enable    # 立即启动并设置登录自启
 dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
-      <p id="retry-hint">窗口可见时会自动重试；切回本窗口会立刻重试一次。</p>
+      <p id="retry-hint">会自动重试。</p>
     </div>
   </div>
 
@@ -65,8 +66,8 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     const path = require('path');
 
     const RETRY_MS = 3000;          // 可见时连接失败的重试间隔
-    const LOAD_TIMEOUT_MS = 10000;  // iframe 置 src 后等待 load 的超时
-    const HIDE_UNLOAD_MS = 60_000;  // 轻量后台模式：持续不可见多久后卸载 dsh 释放资源
+    const LOAD_TIMEOUT_MS = 10000;  // webview 置 src 后等待装载的超时（loadabort 会更快给出失败）
+    const HIDE_UNLOAD_MS = 5_000;   // 轻量后台模式：持续不可见多久后卸载 dsh 释放资源
 
     const view = document.getElementById('view');
     const overlay = document.getElementById('overlay');
@@ -75,7 +76,11 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     const connectingHint = document.getElementById('connecting-hint');
 
     let state = 'connecting'; // 'connecting' | 'ready' | 'error'
+    let firstRun = true;      // 只有首次启动显示全屏 spinner，之后一律静默重试防闪屏
     let currentUrl = null;    // 已成功装载的 dsh URL（token 每次启动都会变）
+    let navUrl = null;        // 上次实际交给 webview 的 URL（同值重复赋值会产生幻影 abort）
+    let needsReload = false;  // 同 URL 也需要重载（ genuine 失败后重试）
+    let abortGrace = null;    // loadabort 延迟判失败：等一等，看是否有 loadstop 跟上（幻影 abort）
     let loadTimer = null;
     let retryTimer = null;
     let hiddenSince = null;   // 开始持续不可见的时间戳
@@ -136,9 +141,11 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     }
 
     function probe(url, timeoutMs) {
+      // 只要能连上就算活：no-cors 下虽然读不到响应体，但连接失败仍会 reject。
+      // （本页 origin 是 chrome-extension，直接 cors 取 http://127.0.0.1 会被拦。）
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      return fetch(url, { signal: controller.signal, redirect: 'follow' })
+      return fetch(url, { signal: controller.signal, redirect: 'follow', mode: 'no-cors' })
         .then((res) => { clearTimeout(timer); return res; })
         .catch((err) => { clearTimeout(timer); throw err; });
     }
@@ -164,33 +171,43 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
         return;
       }
 
-      if (state !== 'connecting') setState('connecting');
+      // 非首次一律静默：保持当前界面（失败页或已就绪的 webview），只换 src 重试。
+      if (state !== 'connecting' && firstRun) setState('connecting');
       try {
         await probe(url, 5000);
       } catch {
+        firstRun = false;
+        needsReload = true;
         setState('error');
         scheduleRetry();
         return;
       }
+      firstRun = false;
 
-      // 探测通过：把 URL 装进 iframe（嵌入而非顶层跳转）。
-      // 若装载长期无 load 事件，视为跳转失败，回失败态。
+      // 探测通过：把 URL 装进 webview（嵌入而非顶层跳转）。
+      // loadabort 会主动报失败；超时是兜底（比如事件没冒上来）。
+      // 同 URL 不重复赋值：否则产生 superseded 幻影 abort（loadstart→abort→loadstart）。
       currentUrl = url;
       if (loadTimer) clearTimeout(loadTimer);
       const expected = url;
       loadTimer = setTimeout(() => {
         if (currentUrl === expected && state !== 'ready') {
+          needsReload = true;
           setState('error');
           scheduleRetry();
         }
       }, LOAD_TIMEOUT_MS);
-      view.src = url;
+      if (navUrl !== url || needsReload) {
+        navUrl = url;
+        needsReload = false;
+        view.src = url;
+      }
       scheduleRetry();
     }
 
     function scheduleRetry() {
       if (retryTimer) clearTimeout(retryTimer);
-      // 就绪态无需轮询：token 变化只能靠服务重启发现，届时 iframe 会先挂；
+      // 就绪态无需轮询：token 变化只能靠服务重启发现，届时 webview 会先挂；
       // 保持一个低频心跳以便自动回到失败态重试。
       retryTimer = setTimeout(connect, state === 'ready' ? 15000 : RETRY_MS);
     }
@@ -204,17 +221,57 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       if (Date.now() - hiddenSince < HIDE_UNLOAD_MS) return;
       currentUrl = null;
       if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
-      try { view.removeAttribute('src'); } catch { /* ignore */ }
+      if (abortGrace) { clearTimeout(abortGrace); abortGrace = null; }
+      try { view.stop(); } catch { /* ignore */ }
+      try { view.src = 'about:blank'; navUrl = 'about:blank'; } catch { /* ignore */ }
       setState('connecting', '轻量后台模式：页面已卸载以节省资源，切回窗口自动恢复。');
     }
 
-    view.addEventListener('load', () => {
-      // about:blank 的 load（卸载后）不算就绪。
-      if (!currentUrl) return;
+    // webview 装载成功：当前导航已 commit 即算就绪。
+    // 注意不用 view.getUrl() 做二次确认：NW 里它不可靠，会永远卡在非 ready。
+    view.addEventListener('loadstop', () => {
+      if (!currentUrl) return; // about:blank（卸载后）的 loadstop 不算就绪
+      if (abortGrace) { clearTimeout(abortGrace); abortGrace = null; }
       if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
       hiddenSince = document.visibilityState === 'visible' ? null : Date.now();
       setState('ready');
       scheduleRetry();
+    });
+
+    // webview 装载失败：延迟一拍再判——同导航的 loadstop 可能随后就到
+    // （重复赋值 src 产生的 superseded 幻影 abort），那时直接取消本次判失败。
+    view.addEventListener('loadabort', (event) => {
+      if (!event.isTopLevel || !currentUrl) return;
+      if (abortGrace) clearTimeout(abortGrace);
+      const reason = event.reason ? `（${event.reason}）` : '';
+      abortGrace = setTimeout(() => {
+        abortGrace = null;
+        if (state === 'ready' || !currentUrl) return;
+        if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
+        currentUrl = null;
+        needsReload = true;
+        setState('error');
+        document.getElementById('retry-hint').textContent =
+          `页面装载失败${reason}，会自动重试。`;
+        scheduleRetry();
+      }, 400);
+    });
+
+    // dsh 里 target=_blank 的外链：转系统浏览器，不在应用里另开窗口。
+    view.addEventListener('newwindow', (event) => {
+      try { event.preventDefault(); } catch { /* ignore */ }
+      const target = event.targetUrl;
+      if (target) {
+        try { nw.Shell.openExternal(target); } catch { /* ignore */ }
+      }
+    });
+
+    // 权限请求：只放行通知，其余拒绝（dsh 目前不需要定位/媒体等）。
+    view.addEventListener('permissionrequest', (event) => {
+      try {
+        if (event.permission === 'notifications') event.request.allow();
+        else event.request.deny();
+      } catch { /* ignore */ }
     });
 
     // 可见性变化：变为可见的一瞬间立刻重试一次；不可见时开始计时。

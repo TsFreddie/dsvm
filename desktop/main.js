@@ -138,6 +138,12 @@ function buildTray() {
 
 function wireWindow(win) {
   mainWin = win;
+  // 应用内任何新窗口请求（webview 里 target=_blank 的外链等）：
+  // 一律不另开窗口，转系统浏览器打开。
+  win.on('new-win-policy', (frame, url, policy) => {
+    try { policy.ignore(); } catch { /* ignore */ }
+    try { nw.Shell.openExternal(url); } catch { /* ignore */ }
+  });
   win.on('minimize', () => {
     if (settings.minimizeToTray) win.hide();
   });

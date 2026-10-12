@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runCli, tempDir } from './helpers.js';
+import { PROJECT_ROOT, runCli, tempDir } from './helpers.js';
 import {
   DownloadProgress,
   fetchLatestNwVersion,
@@ -99,6 +99,27 @@ test('DownloadProgress logs steps without a TTY and refreshes with one', () => {
   assert.ok(frames[0]?.startsWith('\r'), frames.join(''));
   assert.ok(frames[0]?.includes('50%'), frames.join(''));
   assert.ok(frames.at(-1)?.endsWith('\n'), frames.join(''));
+});
+
+test('bundled desktop app uses webview with sane defaults', () => {
+  const root = join(PROJECT_ROOT, 'desktop');
+  const html = readFileSync(join(root, 'index.html'), 'utf8');
+  assert.ok(html.includes('<webview'), 'embeds dsh with <webview>');
+  assert.ok(!html.includes('<iframe'), 'does not use <iframe>');
+  assert.match(html, /partition="persist:dsvm-desktop"/);
+  assert.match(html, /HIDE_UNLOAD_MS = 5_000/);
+  assert.ok(html.includes('loadabort'), 'handles webview load failures');
+  assert.ok(html.includes('newwindow'), 'routes popups to the system browser');
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+    main?: string;
+    window?: { title?: string };
+    ['chromium-args']?: string;
+  };
+  assert.equal(manifest.main, 'main.js');
+  assert.equal(manifest.window?.title, 'DeepSeek Harness (dsvm)');
+  assert.match(manifest['chromium-args'] ?? '', /--ozone-platform-hint=auto/);
+  assert.match(manifest['chromium-args'] ?? '', /--enable-wayland-ime/);
+  assert.match(manifest['chromium-args'] ?? '', /--wayland-text-input-version=3/);
 });
 
 test('desktop help and unknown subcommands', async () => {

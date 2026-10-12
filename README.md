@@ -154,10 +154,13 @@ location means running `dsvm service install --force` again.
 ### Desktop (NW.js)
 
 ```
-dsvm desktop             # cache the nw.js SDK if needed and launch the app
-dsvm desktop install     # cache the SDK and create a user shortcut
-dsvm desktop uninstall   # remove the shortcut and delete the SDK cache
-dsvm desktop update      # install the newest SDK when one is available
+dsvm desktop [--nw-switch...]         # cache the SDK if needed and launch; extra switches
+                                      # pass through to nw, e.g. --ozone-platform=wayland
+                                      # to force native Wayland over XWayland
+dsvm desktop install [--nw-switch...] # cache the SDK and create a shortcut with those
+                                      # switches baked in, e.g. install --ozone-platform=wayland
+dsvm desktop uninstall                # remove the shortcut and delete the SDK cache
+dsvm desktop update                   # install the newest SDK when one is available
 ```
 
 `dsvm desktop` embeds the URL reported by `dsvm service url` in a bundled

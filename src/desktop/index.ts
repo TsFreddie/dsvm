@@ -9,46 +9,63 @@ export function desktopHelpText(): string {
     '',
     'The app embeds the URL reported by `dsvm service url`, so the service',
     'must be installed and running first (`dsvm service install` + `enable`).',
+    'Options starting with `-` are passed through to nw.js, so Chromium',
+    'switches work directly, e.g. `--ozone-platform=wayland` to force native',
+    'Wayland when you dislike XWayland (it beats the bundled auto hint).',
     'Shortcuts launch the cached nw.js binary directly, never through dsvm,',
     'through a stable path that survives updates.',
     '',
     'Subcommands:',
-    '  (none)               Ensure the nw.js SDK cache and launch the app',
-    '  install              Cache nw.js SDK and create a user shortcut',
-    '                       (Linux .desktop entry, Windows Start Menu + Desktop,',
-    '                       macOS app bundle in ~/Applications)',
+    '  (none) [--nw-switch...] Ensure the nw.js SDK cache and launch the app,',
+    '                           passing switches through to nw.js',
+    '  install [--nw-switch...] Cache nw.js SDK and create a user shortcut',
+    '                           (Linux .desktop entry, Windows Start Menu + Desktop,',
+    '                           macOS app bundle in ~/Applications); switches',
+    '                           are baked into the shortcut',
     '  uninstall            Remove the shortcut and delete the nw.js cache',
     '  update               Install the newest nw.js SDK when one is available',
   ].join('\n');
 }
 
+const SUBCOMMANDS = new Set(['install', 'uninstall', 'update', 'help', '--help', '-h']);
+
 export async function desktopCommand(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
-  if (rest.length > 0) fail(`usage: dsvm desktop [install|uninstall|update]`);
+  // `--` 开关透传给 nw（`dsvm desktop --ozone-platform=x`）；
+  // 裸词非子命令视为拼写错误，避免 typo 触发下载和启动。
+  if (subcommand !== undefined && !SUBCOMMANDS.has(subcommand)) {
+    if (!subcommand.startsWith('-')) {
+      fail(`unknown desktop subcommand "${subcommand}"\n\n${desktopHelpText()}`);
+    }
+    return launchDesktop(args);
+  }
   switch (subcommand) {
     case undefined:
-      return launchDesktop();
+      return launchDesktop([]);
     case 'install': {
       const { version, binary } = await ensureNwjs();
-      const result = await installShortcut(binary);
+      const result = await installShortcut(binary, undefined, rest);
       info(`cached nw.js SDK ${version}`);
       for (const created of result.created) info(`created ${created}`);
+      for (const removed of result.removed) info(`removed legacy ${removed}`);
       for (const note of result.notes) info(`note: ${note}`);
       info('launch it from your application menu, or run `dsvm desktop`');
       return;
     }
-    case 'uninstall': {
-      const result = await uninstallShortcut();
-      clearNwCache();
-      if (result.removed.length === 0) {
-        info('no dsvm desktop shortcut found');
-      } else {
-        for (const removed of result.removed) info(`removed ${removed}`);
-      }
-      info('deleted the cached nw.js SDK');
-      return;
-    }
+    case 'uninstall':
     case 'update': {
+      if (rest.length > 0) fail(`usage: dsvm desktop ${subcommand}`);
+      if (subcommand === 'uninstall') {
+        const result = await uninstallShortcut();
+        clearNwCache();
+        if (result.removed.length === 0) {
+          info('no dsvm desktop shortcut found');
+        } else {
+          for (const removed of result.removed) info(`removed ${removed}`);
+        }
+        info('deleted the cached nw.js SDK');
+        return;
+      }
       const latest = await fetchLatestNwVersion();
       const cached = readCachedVersion();
       if (cached === latest) {
@@ -64,6 +81,7 @@ export async function desktopCommand(args: string[]): Promise<void> {
     case 'help':
     case '--help':
     case '-h':
+      if (rest.length > 0) fail('usage: dsvm desktop help');
       info(desktopHelpText());
       return;
     default:

@@ -183,7 +183,7 @@ Usage:
   dsvm current [--json]           Print the active version
   dsvm web [dsh args...]          Run \`dsh web\` in the foreground (handed off to dsh)
   dsvm plugin [dsh args...]       Run \`dsh plugin\` (default --profile web)
-  dsvm desktop [install|uninstall|update]
+  dsvm desktop [install|uninstall|update|nw-args...]
                                   Run the dsh web UI in the bundled NW.js app
   dsvm service <subcommand>       Manage the background web service
   dsvm version                    Print the dsvm version

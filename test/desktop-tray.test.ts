@@ -278,8 +278,12 @@ test('detectWayland prefers the resolved ozone switch', () => {
     detectWayland({ sessionType: undefined, waylandDisplay: undefined, nwPreArgs: '', ozonePlatform: 'wayland' }),
     true,
   );
-  // 显式 x11 压倒 wayland 会话。
+  // 显式 x11 压倒 wayland 会话；显式 wayland 压倒 x11 会话。
   assert.equal(detectWayland({ ...base, nwPreArgs: '--ozone-platform=x11' }), false);
+  assert.equal(
+    detectWayland({ sessionType: 'x11', waylandDisplay: undefined, nwPreArgs: '--ozone-platform=wayland', ozonePlatform: null }),
+    true,
+  );
   // 纯 x11 会话。
   assert.equal(
     detectWayland({ sessionType: 'x11', waylandDisplay: 'wayland-0', nwPreArgs: '', ozonePlatform: null }),

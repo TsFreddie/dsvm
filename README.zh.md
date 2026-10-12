@@ -142,10 +142,12 @@ dsvm 移动了位置，需要重新执行 `dsvm service install --force`。
 ### 桌面端（NW.js）
 
 ```
-dsvm desktop             # 缺 nw.js 缓存则自动下载 SDK 并启动应用
-dsvm desktop install     # 缓存 SDK 并创建用户快捷方式
-dsvm desktop uninstall   # 删除快捷方式并清理 SDK 缓存
-dsvm desktop update      # 有新版 SDK 时更新
+dsvm desktop [--nw 开关...]         # 缺缓存则自动下载 SDK 并启动，多余开关透传给 nw
+                                   # 如：dsvm desktop --ozone-platform=wayland（强制原生 Wayland）
+dsvm desktop install [--nw 开关...] # 缓存 SDK 并创建用户快捷方式，开关会烘进快捷方式
+                                    # 如：dsvm desktop install --ozone-platform=wayland
+dsvm desktop uninstall              # 删除快捷方式并清理 SDK 缓存
+dsvm desktop update                 # 有新版 SDK 时更新
 ```
 
 `dsvm desktop` 把 `dsvm service url` 的地址内嵌到自带的 NW.js 应用里（显示名为

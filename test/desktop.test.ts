@@ -97,6 +97,13 @@ test('linuxDesktopEntry launches nw directly with the app dir', () => {
   assert.ok(!entry.includes('dsvm.js'), 'shortcuts must not go through dsvm');
 });
 
+test('linuxDesktopEntry bakes extra nw args into Exec', () => {
+  const entry = linuxDesktopEntry('/nw', '/app', '/icon.png', ['--ozone-platform=wayland']);
+  assert.match(entry, /^Exec=\/nw \/app --ozone-platform=wayland %U$/m);
+  const plain = linuxDesktopEntry('/nw', '/app', '/icon.png');
+  assert.match(plain, /^Exec=\/nw \/app %U$/m);
+});
+
 test('progress helpers format bytes and bars', () => {
   assert.equal(formatBytes(0), '0.0 B');
   assert.equal(formatBytes(512), '512 B');
@@ -183,10 +190,12 @@ test('desktop help and unknown subcommands', async () => {
   const bad = await runCli(home, ['desktop', 'frobnicate']);
   assert.notEqual(bad.code, 0);
   assert.match(bad.stderr, /unknown desktop subcommand/);
+  // `--` 开关才透传，裸词拼写错误不应触发下载启动。
+  assert.match(help.stdout, /passed through to nw\.js/);
 
-  const extra = await runCli(home, ['desktop', 'install', 'extra']);
+  const extra = await runCli(home, ['desktop', 'uninstall', 'extra']);
   assert.notEqual(extra.code, 0);
-  assert.match(extra.stderr, /usage: dsvm desktop/);
+  assert.match(extra.stderr, /usage: dsvm desktop uninstall/);
 });
 
 test('desktop uninstall without a shortcut still clears the cache', async () => {

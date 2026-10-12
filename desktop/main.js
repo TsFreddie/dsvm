@@ -99,6 +99,7 @@ function effectiveOzonePlatform() {
  */
 function detectWayland({ sessionType, waylandDisplay, nwPreArgs, ozonePlatform }) {
   if (ozonePlatform) return ozonePlatform === 'wayland';
+  if (/(^|\s)--ozone-platform=wayland(\s|$)/.test(nwPreArgs || '')) return true;
   if (/(^|\s)--ozone-platform=x11(\s|$)/.test(nwPreArgs || '')) return false;
   if (sessionType === 'x11') return false;
   if (sessionType === 'wayland') return true;

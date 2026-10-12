@@ -61,6 +61,7 @@ test('linuxDesktopEntry launches nw directly with the app dir', () => {
   const entry = linuxDesktopEntry('/home/u/.dsvm/desktop/nwjs/v0.118.0/nw', '/opt/dsvm/desktop', '/opt/dsvm/desktop/icon.png');
   assert.match(entry, /^\[Desktop Entry\]$/m);
   assert.match(entry, /^Exec=.*nw.*desktop %U$/m);
+  assert.match(entry, /^Name=DeepSeek Harness \(dsvm\)$/m);
   assert.match(entry, /^Icon=\/opt\/dsvm\/desktop\/icon\.png$/m);
   assert.match(entry, /^Terminal=false$/m);
   assert.ok(!entry.includes('dsvm.js'), 'shortcuts must not go through dsvm');

@@ -155,8 +155,9 @@ dsvm desktop uninstall   # 删除快捷方式并清理 SDK 缓存
 dsvm desktop update      # 有新版 SDK 时更新
 ```
 
-`dsvm desktop` 把 `dsvm service url` 的地址内嵌到自带的 NW.js 应用里（永远用
-SDK variant，缓存在 `~/.dsvm/desktop/nwjs/`），所以要先装好并启动 service。
+`dsvm desktop` 把 `dsvm service url` 的地址内嵌到自带的 NW.js 应用里（显示名为
+“DeepSeek Harness (dsvm)”，永远用 SDK variant，缓存在 `~/.dsvm/desktop/nwjs/`），
+所以要先装好并启动 service。
 应用显示连接中界面，用嵌入 frame（而非顶层跳转，这样跳转状态和重试逻辑不会丢）
 装载 dsh；窗口可见时自动重试、切回可见瞬间立刻重试一次，不可见时不重试。托盘常驻
 启用，右键菜单有最小化到托盘、轻量后台模式（持续不可见 60 秒后自动回到连接中页

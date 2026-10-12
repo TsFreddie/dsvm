@@ -169,7 +169,8 @@ dsvm desktop update      # install the newest SDK when one is available
 ```
 
 `dsvm desktop` embeds the URL reported by `dsvm service url` in a bundled
-NW.js app (always the SDK variant, cached under `~/.dsvm/desktop/nwjs/`),
+NW.js app (shown as "DeepSeek Harness (dsvm)", always the SDK variant,
+cached under `~/.dsvm/desktop/nwjs/`),
 so the service must be installed and running first. The app shows a
 connecting screen, loads the dsh UI in an embedded frame (never a top-level
 navigation, so connection state and retries survive), and retries

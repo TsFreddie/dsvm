@@ -66,8 +66,8 @@ function iconPath(file) {
 function buildTray() {
   try {
     tray = new nw.Tray({
-      title: 'dsvm desktop',
-      tooltip: 'dsvm desktop',
+      title: 'DeepSeek Harness (dsvm)',
+      tooltip: 'DeepSeek Harness (dsvm)',
       icon: iconPath('tray.png'),
     });
   } catch (err) {

@@ -4,7 +4,7 @@
   "description": "dsvm desktop: NW.js wrapper that embeds the dsh web UI served by `dsvm service`",
   "main": "main.js",
   "window": {
-    "title": "dsvm desktop",
+    "title": "DeepSeek Harness (dsvm)",
     "width": 1280,
     "height": 860,
     "min_width": 800,

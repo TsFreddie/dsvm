@@ -5,7 +5,9 @@ import { desktopAppDir } from './nwjs.js';
 import { DsvmError, commandExists, mkdirp, rmrf, run, writeTextAtomic } from '../util.js';
 
 export const DESKTOP_ENTRY_NAME = 'dsvm-desktop.desktop';
-export const APP_DISPLAY_NAME = 'dsvm desktop';
+export const APP_DISPLAY_NAME = 'DeepSeek Harness (dsvm)';
+/** 旧版显示名：卸载时一并清理，`install` 时也会顺手收走。 */
+export const LEGACY_APP_DISPLAY_NAME = 'dsvm desktop';
 
 /** 快捷方式创建结果：建了什么、删了什么，如实回显给用户。 */
 export interface ShortcutResult {
@@ -29,7 +31,7 @@ export function linuxDesktopEntry(nwBinary: string, appDir: string, icon: string
     '[Desktop Entry]',
     'Type=Application',
     `Name=${APP_DISPLAY_NAME}`,
-    'Comment=DeepSeek Harness desktop (dsvm service web UI)',
+    'Comment=DeepSeek Harness (dsvm service web UI)',
     `Exec=${quote(nwBinary)} ${quote(appDir)} %U`,
     `TryExec=${nwBinary}`,
     `Icon=${icon}`,
@@ -78,29 +80,23 @@ function windowsLinkScript(link: string, target: string, args: string, icon: str
     `$shortcut.Arguments = ${JSON.stringify(args)}`,
     `$shortcut.WorkingDirectory = ${JSON.stringify(dirname(target))}`,
     `$shortcut.IconLocation = ${JSON.stringify(icon)}`,
-    `$shortcut.Description = ${JSON.stringify('dsvm desktop (dsh web UI)')}`,
+    `$shortcut.Description = ${JSON.stringify('DeepSeek Harness (dsvm)')}`,
     `$shortcut.Save()`,
   ].join('\r\n');
 }
 
 async function installWindows(nwBinary: string, appDir: string, result: ShortcutResult): Promise<void> {
   const icon = existsSync(appIcon('ico')) ? appIcon('ico') : nwBinary;
-  const startMenuDir = join(
-    homedir(),
-    'AppData',
-    'Roaming',
-    'Microsoft',
-    'Windows',
-    'Start Menu',
-    'Programs',
-    'dsvm desktop',
-  );
-  const desktopDir = join(homedir(), 'Desktop');
+  const [startMenuDir, desktopLink] = windowsShortcutPaths(APP_DISPLAY_NAME) as [string, string];
+  // 收走旧版显示名的残留，避免新旧并存。
+  for (const legacy of windowsShortcutPaths(LEGACY_APP_DISPLAY_NAME)) {
+    if (existsSync(legacy)) {
+      rmrf(legacy);
+      result.removed.push(legacy);
+    }
+  }
   mkdirp(startMenuDir);
-  const links = [
-    join(startMenuDir, 'dsvm desktop.lnk'),
-    join(desktopDir, 'dsvm desktop.lnk'),
-  ];
+  const links = [join(startMenuDir, `${APP_DISPLAY_NAME}.lnk`), desktopLink];
   for (const link of links) {
     mkdirp(dirname(link));
     await run('powershell', [
@@ -113,8 +109,8 @@ async function installWindows(nwBinary: string, appDir: string, result: Shortcut
   }
 }
 
-async function uninstallWindows(result: ShortcutResult): Promise<void> {
-  const candidates = [
+function windowsShortcutPaths(displayName: string): string[] {
+  return [
     join(
       homedir(),
       'AppData',
@@ -123,9 +119,16 @@ async function uninstallWindows(result: ShortcutResult): Promise<void> {
       'Windows',
       'Start Menu',
       'Programs',
-      'dsvm desktop',
+      displayName,
     ),
-    join(homedir(), 'Desktop', 'dsvm desktop.lnk'),
+    join(homedir(), 'Desktop', `${displayName}.lnk`),
+  ];
+}
+
+async function uninstallWindows(result: ShortcutResult): Promise<void> {
+  const candidates = [
+    ...windowsShortcutPaths(APP_DISPLAY_NAME),
+    ...windowsShortcutPaths(LEGACY_APP_DISPLAY_NAME),
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
@@ -141,7 +144,13 @@ async function uninstallWindows(result: ShortcutResult): Promise<void> {
  * 实在建不出来则抛错提示不支持，由上层如实转告用户。
  */
 async function installMac(nwBinary: string, appDir: string, result: ShortcutResult): Promise<void> {
-  const appBundle = join(homedir(), 'Applications', 'dsvm desktop.app');
+  const appBundle = join(homedir(), 'Applications', `${APP_DISPLAY_NAME}.app`);
+  // 收走旧版显示名的残留。
+  const legacyBundle = join(homedir(), 'Applications', `${LEGACY_APP_DISPLAY_NAME}.app`);
+  if (existsSync(legacyBundle)) {
+    rmrf(legacyBundle);
+    result.removed.push(legacyBundle);
+  }
   const macosDir = join(appBundle, 'Contents', 'MacOS');
   try {
     mkdirp(macosDir);
@@ -188,10 +197,12 @@ async function installMac(nwBinary: string, appDir: string, result: ShortcutResu
 }
 
 async function uninstallMac(result: ShortcutResult): Promise<void> {
-  const appBundle = join(homedir(), 'Applications', 'dsvm desktop.app');
-  if (existsSync(appBundle)) {
-    rmrf(appBundle);
-    result.removed.push(appBundle);
+  for (const name of [APP_DISPLAY_NAME, LEGACY_APP_DISPLAY_NAME]) {
+    const appBundle = join(homedir(), 'Applications', `${name}.app`);
+    if (existsSync(appBundle)) {
+      rmrf(appBundle);
+      result.removed.push(appBundle);
+    }
   }
   // 兼容早期版本可能写过的启动脚本。
   const legacy = join(homedir(), 'Applications', 'dsvm-desktop.sh');

@@ -11,6 +11,7 @@ Version manager and background-service runner for [`@deepseek-ai/dsh`](https://w
   LaunchAgent on macOS, Task Scheduler task on Windows) that always starts
   through `dsvm`, so switching versions never requires editing the unit.
 - Open the running instance's authenticated URL with `dsvm` / `dsvm open`.
+- Run the web UI in a bundled NW.js desktop app with `dsvm desktop`.
 
 ## Requirements
 
@@ -157,6 +158,33 @@ the service is running.
 `install` records the absolute paths of the dsvm launcher, node, the dsvm home,
 and the PATH from the installing shell. Moving or reinstalling dsvm in another
 location means running `dsvm service install --force` again.
+
+### Desktop (NW.js)
+
+```
+dsvm desktop             # cache the nw.js SDK if needed and launch the app
+dsvm desktop install     # cache the SDK and create a user shortcut
+dsvm desktop uninstall   # remove the shortcut and delete the SDK cache
+dsvm desktop update      # install the newest SDK when one is available
+```
+
+`dsvm desktop` embeds the URL reported by `dsvm service url` in a bundled
+NW.js app (always the SDK variant, cached under `~/.dsvm/desktop/nwjs/`),
+so the service must be installed and running first. The app shows a
+connecting screen, loads the dsh UI in an embedded frame (never a top-level
+navigation, so connection state and retries survive), and retries
+automatically while its window is visible — retrying once immediately when
+the window becomes visible, never while hidden. A persistent tray icon
+stays enabled with toggles for minimize-to-tray, lightweight background
+mode (unloads the page back to the connecting screen after 60 s hidden),
+and minimize-on-close, plus quit. On Linux the app defaults to Wayland
+(`--ozone-platform-hint=auto`) with Wayland IME support
+(`--enable-wayland-ime --wayland-text-input-version=3`). Window and tray
+icons reuse the official dsh whale mark (`desktop/icon.svg/png`).
+Shortcuts launch the cached nw.js binary directly, never through dsvm:
+Linux writes `~/.local/share/applications/dsvm-desktop.desktop`, Windows
+creates Start Menu + Desktop links, macOS drops a minimal `.app` bundle in
+`~/Applications` (default dock icon; custom icns is best-effort).
 
 ### Opening
 

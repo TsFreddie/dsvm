@@ -1,0 +1,19 @@
+{
+  "name": "dsvm-desktop",
+  "version": "0.1.0",
+  "description": "dsvm desktop: NW.js wrapper that embeds the dsh web UI served by `dsvm service`",
+  "main": "main.js",
+  "window": {
+    "title": "dsvm desktop",
+    "width": 1280,
+    "height": 860,
+    "min_width": 800,
+    "min_height": 600,
+    "icon": "icon.png",
+    "show_in_taskbar": true,
+    "show": true
+  },
+  "chromium-args": "--ozone-platform-hint=auto --enable-features=UseOzonePlatform,WaylandWindowDecorations --enable-wayland-ime --wayland-text-input-version=3",
+  "nodejs": true,
+  "single-instance": true
+}

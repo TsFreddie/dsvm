@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dsvm desktop</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif; }
+    #view { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+    #overlay {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: var(--dsh-boot-bg, #fff);
+    }
+    @media (prefers-color-scheme: dark) { #overlay { background: #151517; } }
+    .card { max-width: 560px; padding: 32px; text-align: center; }
+    .spinner {
+      width: 36px; height: 36px; margin: 0 auto 16px; border-radius: 50%;
+      border: 3px solid rgba(127, 127, 127, .35); border-top-color: currentColor;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
+    p { font-size: 14px; line-height: 1.7; opacity: .8; margin: 8px 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+      background: rgba(127, 127, 127, .15); padding: 1px 6px; border-radius: 4px;
+    }
+    pre {
+      text-align: left; font-size: 12.5px; line-height: 1.7; white-space: pre-wrap;
+      background: rgba(127, 127, 127, .12); padding: 12px 14px; border-radius: 8px;
+    }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <!--
+    dsh 以嵌入方式展示（iframe），而不是顶层跳转：
+    顶层跳转会卸载本页，导致拿不到跳转状态、重试逻辑一并丢失；
+    嵌入则让本页常驻，可以探测服务状态、覆盖连接中/失败态并自动重试。
+  -->
+  <iframe id="view" title="dsh" nwdisable nwfaketop hidden></iframe>
+
+  <div id="overlay">
+    <div class="card" id="connecting">
+      <div class="spinner"></div>
+      <h1>正在连接 dsh……</h1>
+      <p id="connecting-hint">正在读取本地服务地址，请稍候。</p>
+    </div>
+    <div class="card" id="failure" hidden>
+      <h1>dsh 当前没有启用</h1>
+      <p>没有读到正在运行的 dsvm 服务地址。请先用 dsvm 把 service 配置并启动起来：</p>
+      <pre>dsvm service install   # 注册后台服务定义（默认端口 7766）
+dsvm service enable    # 立即启动并设置登录自启
+dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
+      <p id="retry-hint">窗口可见时会自动重试；切回本窗口会立刻重试一次。</p>
+    </div>
+  </div>
+
+  <script>
+    'use strict';
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+
+    const RETRY_MS = 3000;          // 可见时连接失败的重试间隔
+    const LOAD_TIMEOUT_MS = 10000;  // iframe 置 src 后等待 load 的超时
+    const HIDE_UNLOAD_MS = 60_000;  // 轻量后台模式：持续不可见多久后卸载 dsh 释放资源
+
+    const view = document.getElementById('view');
+    const overlay = document.getElementById('overlay');
+    const connecting = document.getElementById('connecting');
+    const failure = document.getElementById('failure');
+    const connectingHint = document.getElementById('connecting-hint');
+
+    let state = 'connecting'; // 'connecting' | 'ready' | 'error'
+    let currentUrl = null;    // 已成功装载的 dsh URL（token 每次启动都会变）
+    let loadTimer = null;
+    let retryTimer = null;
+    let hiddenSince = null;   // 开始持续不可见的时间戳
+
+    function dsvmHome() {
+      return process.env.DSVM_HOME || path.join(os.homedir(), '.dsvm');
+    }
+
+    function readSettings() {
+      try {
+        const raw = fs.readFileSync(path.join(dsvmHome(), 'desktop', 'settings.json'), 'utf8');
+        const parsed = JSON.parse(raw);
+        return { lightweightMode: parsed.lightweightMode === true };
+      } catch {
+        return { lightweightMode: false };
+      }
+    }
+
+    /** 读本地服务地址；读不到 / 进程已死都返回 null（视为未启用）。 */
+    function readServiceUrl() {
+      try {
+        const raw = fs.readFileSync(path.join(dsvmHome(), 'service', 'url.json'), 'utf8');
+        const state = JSON.parse(raw);
+        if (typeof state.url !== 'string' || !state.url) return null;
+        if (Number.isInteger(state.pid) && state.pid > 0) {
+          try { process.kill(state.pid, 0); } catch { return null; }
+        }
+        return state.url;
+      } catch {
+        return null;
+      }
+    }
+
+    function show(el) {
+      overlay.hidden = false;
+      connecting.hidden = el !== connecting;
+      failure.hidden = el !== failure;
+    }
+
+    function showView() {
+      overlay.hidden = true;
+      view.hidden = false;
+    }
+
+    function setState(next, hint) {
+      state = next;
+      if (next === 'connecting') {
+        view.hidden = true;
+        if (hint) connectingHint.textContent = hint;
+        show(connecting);
+      } else if (next === 'error') {
+        view.hidden = true;
+        currentUrl = null;
+        show(failure);
+      } else if (next === 'ready') {
+        showView();
+      }
+    }
+
+    function probe(url, timeoutMs) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      return fetch(url, { signal: controller.signal, redirect: 'follow' })
+        .then((res) => { clearTimeout(timer); return res; })
+        .catch((err) => { clearTimeout(timer); throw err; });
+    }
+
+    async function connect() {
+      // 不可见时不重试：只记录不可见起始时间，轻量后台模式靠它计时。
+      if (document.visibilityState !== 'visible') {
+        if (hiddenSince === null) hiddenSince = Date.now();
+        scheduleRetry();
+        return;
+      }
+      hiddenSince = null;
+
+      // 已就绪且 URL 没变（token 重启会变）：无需重复装载。
+      const url = readServiceUrl();
+      if (!url) {
+        if (state !== 'error') setState('error');
+        scheduleRetry();
+        return;
+      }
+      if (state === 'ready' && url === currentUrl) {
+        scheduleRetry();
+        return;
+      }
+
+      if (state !== 'connecting') setState('connecting');
+      try {
+        await probe(url, 5000);
+      } catch {
+        setState('error');
+        scheduleRetry();
+        return;
+      }
+
+      // 探测通过：把 URL 装进 iframe（嵌入而非顶层跳转）。
+      // 若装载长期无 load 事件，视为跳转失败，回失败态。
+      currentUrl = url;
+      if (loadTimer) clearTimeout(loadTimer);
+      const expected = url;
+      loadTimer = setTimeout(() => {
+        if (currentUrl === expected && state !== 'ready') {
+          setState('error');
+          scheduleRetry();
+        }
+      }, LOAD_TIMEOUT_MS);
+      view.src = url;
+      scheduleRetry();
+    }
+
+    function scheduleRetry() {
+      if (retryTimer) clearTimeout(retryTimer);
+      // 就绪态无需轮询：token 变化只能靠服务重启发现，届时 iframe 会先挂；
+      // 保持一个低频心跳以便自动回到失败态重试。
+      retryTimer = setTimeout(connect, state === 'ready' ? 15000 : RETRY_MS);
+    }
+
+    /** 轻量后台模式：持续不可见超阈值后卸载 dsh，回到 index.html 节省前端资源。 */
+    function maybeUnloadForLightweight() {
+      if (document.visibilityState === 'visible') return;
+      if (hiddenSince === null) hiddenSince = Date.now();
+      if (!readSettings().lightweightMode) return;
+      if (currentUrl === null && state !== 'ready') return;
+      if (Date.now() - hiddenSince < HIDE_UNLOAD_MS) return;
+      currentUrl = null;
+      if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
+      try { view.removeAttribute('src'); } catch { /* ignore */ }
+      setState('connecting', '轻量后台模式：页面已卸载以节省资源，切回窗口自动恢复。');
+    }
+
+    view.addEventListener('load', () => {
+      // about:blank 的 load（卸载后）不算就绪。
+      if (!currentUrl) return;
+      if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
+      hiddenSince = document.visibilityState === 'visible' ? null : Date.now();
+      setState('ready');
+      scheduleRetry();
+    });
+
+    // 可见性变化：变为可见的一瞬间立刻重试一次；不可见时开始计时。
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        hiddenSince = null;
+        if (state !== 'ready') connect();
+        else {
+          // 就绪态切回也顺手确认一次 URL 是否过期（token 可能已轮换）。
+          const url = readServiceUrl();
+          if (url && url !== currentUrl) connect();
+        }
+      } else if (hiddenSince === null) {
+        hiddenSince = Date.now();
+      }
+    });
+
+    // 轻量卸载检查与重试节拍：1s 一次，开销可忽略；
+    // 真正的连接探测只在可见时发生（connect 内部守卫）。
+    setInterval(() => {
+      maybeUnloadForLightweight();
+    }, 1000);
+
+    connect();
+  </script>
+</body>
+</html>

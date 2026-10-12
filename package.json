@@ -9,6 +9,7 @@
   "files": [
     "bin",
     "build/src",
+    "desktop",
     "README.md",
     "README.zh.md"
   ],

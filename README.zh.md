@@ -9,6 +9,7 @@
   LaunchAgent，Windows 用任务计划程序），服务最终通过 `dsvm` 启动，因此切换版本
   后不需要重新编辑 unit。
 - `dsvm` / `dsvm open` 直接打开正在运行实例的带 token URL。
+- `dsvm desktop` 在自带 NW.js 桌面应用里打开 Web UI。
 
 ## 依赖
 
@@ -144,6 +145,28 @@ dsvm service enable | disable | start | stop | restart | status [--json] | url |
 
 `install` 会记录 dsvm 启动脚本、node、dsvm home 和安装时 PATH 的绝对路径；如果
 dsvm 移动了位置，需要重新执行 `dsvm service install --force`。
+
+### 桌面端（NW.js）
+
+```
+dsvm desktop             # 缺 nw.js 缓存则自动下载 SDK 并启动应用
+dsvm desktop install     # 缓存 SDK 并创建用户快捷方式
+dsvm desktop uninstall   # 删除快捷方式并清理 SDK 缓存
+dsvm desktop update      # 有新版 SDK 时更新
+```
+
+`dsvm desktop` 把 `dsvm service url` 的地址内嵌到自带的 NW.js 应用里（永远用
+SDK variant，缓存在 `~/.dsvm/desktop/nwjs/`），所以要先装好并启动 service。
+应用显示连接中界面，用嵌入 frame（而非顶层跳转，这样跳转状态和重试逻辑不会丢）
+装载 dsh；窗口可见时自动重试、切回可见瞬间立刻重试一次，不可见时不重试。托盘常驻
+启用，右键菜单有最小化到托盘、轻量后台模式（持续不可见 60 秒后自动回到连接中页
+释放前端资源）、关闭时最小化三个开关（默认全关）以及退出。Linux 默认自动启用
+Wayland（`--ozone-platform-hint=auto`）并支持 Wayland 输入法
+（`--enable-wayland-ime --wayland-text-input-version=3`）。窗口和托盘图标直接复用
+官方 dsh 鲸鱼标（`desktop/icon.svg/png`）。快捷方式直接启动缓存的 nw 二进制，不走
+dsvm（避免 Linux 图标归属问题）：Linux 写
+`~/.local/share/applications/dsvm-desktop.desktop`，Windows 建开始菜单 + 桌面图标，
+macOS 在 `~/Applications` 放最小 `.app`（默认 dock 图标，icns 为最佳努力）。
 
 ### 打开
 

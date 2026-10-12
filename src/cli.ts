@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describeCurrent } from './config.js';
+import { desktopCommand, desktopHelpText } from './desktop/index.js';
 import { openCommand } from './open.js';
 import { pluginCommand } from './plugin.js';
 import { versionsDir } from './paths.js';
@@ -182,6 +183,8 @@ Usage:
   dsvm current [--json]           Print the active version
   dsvm web [dsh args...]          Run \`dsh web\` in the foreground (handed off to dsh)
   dsvm plugin [dsh args...]       Run \`dsh plugin\` (default --profile web)
+  dsvm desktop [install|uninstall|update]
+                                  Run the dsh web UI in the bundled NW.js app
   dsvm service <subcommand>       Manage the background web service
   dsvm version                    Print the dsvm version
   dsvm help [command]             Show help
@@ -214,6 +217,7 @@ const COMMAND_HELP: Record<string, string> = {
 export function helpText(topic?: string): string {
   if (!topic) return GENERAL_HELP;
   if (topic === 'service') return `Usage: dsvm service <subcommand>\n\n${serviceHelpText()}`;
+  if (topic === 'desktop') return `Usage: dsvm desktop [install|uninstall|update]\n\n${desktopHelpText()}`;
   return COMMAND_HELP[topic] ?? `unknown command "${topic}"\n\n${GENERAL_HELP}`;
 }
 
@@ -242,6 +246,8 @@ export async function main(argv: string[]): Promise<void> {
       return webCommand(rest);
     case 'plugin':
       return pluginCommand(rest);
+    case 'desktop':
+      return desktopCommand(rest);
     case 'service':
       return serviceCommand(rest);
     case 'version':

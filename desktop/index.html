@@ -64,6 +64,7 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     const fs = require('fs');
     const os = require('os');
     const path = require('path');
+    const openExternalUrl = require('./open-external.js');
 
     const RETRY_MS = 3000;          // 可见时连接失败的重试间隔
     const LOAD_TIMEOUT_MS = 10000;  // webview 置 src 后等待装载的超时（loadabort 会更快给出失败）
@@ -83,7 +84,9 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     let abortGrace = null;    // loadabort 延迟判失败：等一等，看是否有 loadstop 跟上（幻影 abort）
     let loadTimer = null;
     let retryTimer = null;
-    let hiddenSince = null;   // 开始持续不可见的时间戳
+    let hiddenSince = null;   // 开始持续不可见的时间戳（仅用于连接重试门控）
+    let minimizedNow = false; // main.js 同步的最小化状态（轻量模式的唯一依据）
+    let minimizedSince = null; // 开始持续最小化的时间戳
 
     function dsvmHome() {
       return process.env.DSVM_HOME || path.join(os.homedir(), '.dsvm');
@@ -96,6 +99,16 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
         return { lightweightMode: parsed.lightweightMode === true };
       } catch {
         return { lightweightMode: false };
+      }
+    }
+
+    // main.js（bg）维护的最小化状态。不用 visibility 判断：最小化有明确回调。
+    function readMinimized() {
+      try {
+        const raw = fs.readFileSync(path.join(dsvmHome(), 'desktop', 'runtime-state.json'), 'utf8');
+        return JSON.parse(raw).minimized === true;
+      } catch {
+        return false;
       }
     }
 
@@ -212,18 +225,23 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       retryTimer = setTimeout(connect, state === 'ready' ? 15000 : RETRY_MS);
     }
 
-    /** 轻量后台模式：持续不可见超阈值后卸载 dsh，回到 index.html 节省前端资源。 */
+    /** 轻量后台模式：持续最小化超阈值后卸载 webview，回到连接中页释放前端资源。 */
     function maybeUnloadForLightweight() {
-      if (document.visibilityState === 'visible') return;
-      if (hiddenSince === null) hiddenSince = Date.now();
+      if (!minimizedNow) return;
+      if (minimizedSince === null) minimizedSince = Date.now();
       if (!readSettings().lightweightMode) return;
       if (currentUrl === null && state !== 'ready') return;
-      if (Date.now() - hiddenSince < HIDE_UNLOAD_MS) return;
+      if (Date.now() - minimizedSince < HIDE_UNLOAD_MS) return;
       currentUrl = null;
       if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
       if (abortGrace) { clearTimeout(abortGrace); abortGrace = null; }
       try { view.stop(); } catch { /* ignore */ }
       try { view.src = 'about:blank'; navUrl = 'about:blank'; } catch { /* ignore */ }
+      // 杀掉 Guest 渲染进程，真释放内存（只跳 about:blank 的话旧堆还留在原进程里）。
+      // 下次装载真实 URL 时 webview 会自动起新 Guest。
+      try {
+        if (typeof view.terminate === 'function') view.terminate();
+      } catch { /* ignore */ }
       setState('connecting', '轻量后台模式：页面已卸载以节省资源，切回窗口自动恢复。');
     }
 
@@ -257,13 +275,18 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       }, 400);
     });
 
-    // dsh 里 target=_blank 的外链：转系统浏览器，不在应用里另开窗口。
+    // dsh 里 target=_blank 的外链：不让它在应用里另开窗口，转系统浏览器。
+    // 注意：Chrome webview 的正确拦截是 e.window.discard()，preventDefault 无效。
     view.addEventListener('newwindow', (event) => {
-      try { event.preventDefault(); } catch { /* ignore */ }
-      const target = event.targetUrl;
-      if (target) {
-        try { nw.Shell.openExternal(target); } catch { /* ignore */ }
+      try {
+        if (event.window && typeof event.window.discard === 'function') {
+          event.window.discard();
+        }
+      } catch (err) {
+        console.error(`dsvm desktop: cannot discard popup: ${err.message}`);
       }
+      const target = event.targetUrl;
+      if (target) openExternalUrl(target);
     });
 
     // 权限请求：只放行通知，其余拒绝（dsh 目前不需要定位/媒体等）。
@@ -289,9 +312,23 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       }
     });
 
-    // 轻量卸载检查与重试节拍：1s 一次，开销可忽略；
-    // 真正的连接探测只在可见时发生（connect 内部守卫）。
+    // 最小化状态轮询与轻量卸载检查：1s 一次，开销可忽略。
+    // 从最小化恢复的一瞬间，若不在就绪态立刻重试一次。
     setInterval(() => {
+      const wasMinimized = minimizedNow;
+      minimizedNow = readMinimized();
+      if (minimizedNow) {
+        if (minimizedSince === null) minimizedSince = Date.now();
+      } else {
+        const justRestored = wasMinimized && minimizedSince !== null;
+        minimizedSince = null;
+        if (justRestored && state !== 'ready') connect();
+        else if (justRestored) {
+          // 就绪态恢复也顺手确认一次 URL 是否过期（token 可能已轮换）。
+          const url = readServiceUrl();
+          if (url && url !== currentUrl) connect();
+        }
+      }
       maybeUnloadForLightweight();
     }, 1000);
 

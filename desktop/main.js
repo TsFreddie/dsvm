@@ -7,6 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const openExternalUrl = require('./open-external.js');
 
 function dsvmHome() {
   return process.env.DSVM_HOME || path.join(os.homedir(), '.dsvm');
@@ -46,6 +47,31 @@ function saveSettings(settings) {
 }
 
 const settings = loadSettings();
+
+// 最小化状态：唯一事实源。OS 最小化走 minimize/restore 事件；
+// 程序 hide()/show()（托盘/关闭逻辑）没有对应事件，调用处手动同步。
+// 写 runtime-state.json 供 index.html 轮询（轻量模式的卸载依据）。
+let minimized = false;
+
+function runtimeStateFile() {
+  return path.join(dsvmHome(), 'desktop', 'runtime-state.json');
+}
+
+function publishMinimized() {
+  try {
+    fs.mkdirSync(path.dirname(runtimeStateFile()), { recursive: true });
+    fs.writeFileSync(runtimeStateFile(), `${JSON.stringify({ minimized })}\n`);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`dsvm desktop: cannot publish window state: ${err.message}`);
+  }
+}
+
+function setMinimized(value) {
+  if (minimized === value) return;
+  minimized = value;
+  publishMinimized();
+}
 
 // 常驻托盘：模块级持有，永不 remove（“始终启用”）。
 let tray = null;
@@ -125,12 +151,14 @@ function buildTray() {
   tray.on('click', () => {
     if (mainWin !== null) {
       mainWin.show();
+      setMinimized(false);
       mainWin.focus();
       return;
     }
     nw.Window.open('index.html', {}, (win) => {
       wireWindow(win);
       win.show();
+      setMinimized(false);
       win.focus();
     });
   });
@@ -141,17 +169,27 @@ function wireWindow(win) {
   // 应用内任何新窗口请求（webview 里 target=_blank 的外链等）：
   // 一律不另开窗口，转系统浏览器打开。
   win.on('new-win-policy', (frame, url, policy) => {
-    try { policy.ignore(); } catch { /* ignore */ }
-    try { nw.Shell.openExternal(url); } catch { /* ignore */ }
+    try {
+      policy.ignore();
+    } catch (err) {
+      console.error(`dsvm desktop: cannot ignore new window: ${err.message}`);
+    }
+    openExternalUrl(url);
   });
   win.on('minimize', () => {
+    setMinimized(true);
     if (settings.minimizeToTray) win.hide();
+  });
+
+  win.on('restore', () => {
+    setMinimized(false);
   });
 
   win.on('close', function () {
     // 不调 this.close(true) 即取消关闭。
     if (settings.closeToMinimize) {
       win.hide();
+      setMinimized(true);
       return;
     }
     this.close(true);
@@ -165,6 +203,8 @@ function wireWindow(win) {
 }
 
 buildTray();
+// 启动即发布一次，避免上次异常退出残留的 true 误导页面。
+publishMinimized();
 
 nw.Window.open('index.html', {}, (win) => {
   wireWindow(win);

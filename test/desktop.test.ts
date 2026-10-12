@@ -122,6 +122,19 @@ test('bundled desktop app uses webview with sane defaults', () => {
   assert.match(manifest['chromium-args'] ?? '', /--wayland-text-input-version=3/);
 });
 
+test('lightweight mode follows minimize state via runtime-state.json', () => {
+  const root = join(PROJECT_ROOT, 'desktop');
+  const main = readFileSync(join(root, 'main.js'), 'utf8');
+  assert.ok(main.includes("win.on('minimize'"), 'tracks OS minimize');
+  assert.ok(main.includes("win.on('restore'"), 'tracks restore');
+  assert.ok(main.includes('runtime-state.json'), 'publishes minimize state for the page');
+  const html = readFileSync(join(root, 'index.html'), 'utf8');
+  assert.ok(html.includes('readMinimized'), 'page polls minimize state');
+  assert.ok(html.includes('minimizedSince'), 'unload timing is minimize-based');
+  assert.ok(html.includes('.terminate('), 'unload kills the guest renderer');
+  assert.ok(html.includes('open-external.js'), 'external links go through the shared opener');
+});
+
 test('desktop help and unknown subcommands', async () => {
   const home = tempDir('desktop');
   const help = await runCli(home, ['desktop', 'help']);

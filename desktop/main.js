@@ -111,7 +111,10 @@ function buildTray() {
     checked: settings.minimizeToTray,
   });
   minimizeItem.on('click', () => {
-    settings.minimizeToTray = minimizeItem.checked;
+    // NW 在 emit 前已自动翻转 checked（见 menuitem.js handleEvent），这里以自身设置为准
+    // 再显式回写，保证各后端显示一致。
+    settings.minimizeToTray = !settings.minimizeToTray;
+    minimizeItem.checked = settings.minimizeToTray;
     saveSettings(settings);
   });
 
@@ -121,7 +124,8 @@ function buildTray() {
     checked: settings.lightweightMode,
   });
   lightweightItem.on('click', () => {
-    settings.lightweightMode = lightweightItem.checked;
+    settings.lightweightMode = !settings.lightweightMode;
+    lightweightItem.checked = settings.lightweightMode;
     saveSettings(settings);
   });
 
@@ -131,7 +135,8 @@ function buildTray() {
     checked: settings.closeToMinimize,
   });
   closeItem.on('click', () => {
-    settings.closeToMinimize = closeItem.checked;
+    settings.closeToMinimize = !settings.closeToMinimize;
+    closeItem.checked = settings.closeToMinimize;
     saveSettings(settings);
   });
 

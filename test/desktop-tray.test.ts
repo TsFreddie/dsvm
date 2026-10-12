@@ -87,14 +87,49 @@ function installNwStub(
   };
 }
 
+/** 在指定环境变量下全新加载 main.js（绕 require 缓存），返回托盘项与点击入口。 */
+function loadMainWithEnv(env: Record<string, string | undefined>): {
+  collected: FakeItem[];
+  clicks: Record<string, () => void>;
+  wins: FakeWin[];
+} {
+  const collected: FakeItem[] = [];
+  const clicks: Record<string, () => void> = {};
+  const wins: FakeWin[] = [];
+  installNwStub(collected, clicks, wins);
+  const req = createRequire(import.meta.url);
+  const mainPath = join(PROJECT_ROOT, 'desktop', 'main.js');
+  delete req.cache[mainPath];
+  const saved: Record<string, string | undefined> = {};
+  for (const key of Object.keys(env)) {
+    saved[key] = process.env[key];
+    const value = env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    req(mainPath);
+  } finally {
+    for (const key of Object.keys(env)) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key] as string;
+    }
+  }
+  return { collected, clicks, wins };
+}
+
 test('tray checkbox clicks flip settings without native auto-toggle', () => {
   const collected: FakeItem[] = [];
   const clicks: Record<string, () => void> = {};
   installNwStub(collected, clicks, []);
-
   const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-'));
   const previous = process.env.DSVM_HOME;
   process.env.DSVM_HOME = home;
+  // 固定 x11 环境：Wayland 下那两项本就不存在。
+  const prevSession = process.env.XDG_SESSION_TYPE;
+  const prevWayland = process.env.WAYLAND_DISPLAY;
+  process.env.XDG_SESSION_TYPE = 'x11';
+  delete process.env.WAYLAND_DISPLAY;
   try {
     const req = createRequire(import.meta.url);
     const mainPath = join(PROJECT_ROOT, 'desktop', 'main.js');
@@ -127,6 +162,49 @@ test('tray checkbox clicks flip settings without native auto-toggle', () => {
   } finally {
     if (previous === undefined) delete process.env.DSVM_HOME;
     else process.env.DSVM_HOME = previous;
+    if (prevSession === undefined) delete process.env.XDG_SESSION_TYPE;
+    else process.env.XDG_SESSION_TYPE = prevSession;
+    if (prevWayland !== undefined) process.env.WAYLAND_DISPLAY = prevWayland;
+  }
+});
+
+test('tray omits minimize-dependent items on Wayland', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-wayland-'));
+  const previous = process.env.DSVM_HOME;
+  process.env.DSVM_HOME = home;
+  try {
+    const { collected } = loadMainWithEnv({
+      XDG_SESSION_TYPE: 'wayland',
+      WAYLAND_DISPLAY: 'wayland-0',
+      NW_PRE_ARGS: undefined,
+    });
+    const labels = collected.map((item) => item.label);
+    assert.ok(!labels.includes('最小化到托盘'), 'no minimize-to-tray on Wayland');
+    assert.ok(!labels.includes('轻量后台模式'), 'no lightweight mode on Wayland');
+    assert.ok(labels.includes('关闭时最小化'), 'close-to-minimize stays');
+    assert.ok(labels.includes('退出'), 'quit stays');
+  } finally {
+    if (previous === undefined) delete process.env.DSVM_HOME;
+    else process.env.DSVM_HOME = previous;
+  }
+});
+
+test('tray keeps minimize-dependent items under explicit x11', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-x11-'));
+  const previous = process.env.DSVM_HOME;
+  process.env.DSVM_HOME = home;
+  try {
+    const { collected } = loadMainWithEnv({
+      XDG_SESSION_TYPE: 'wayland',
+      WAYLAND_DISPLAY: 'wayland-0',
+      NW_PRE_ARGS: '--ozone-platform=x11',
+    });
+    const labels = collected.map((item) => item.label);
+    assert.ok(labels.includes('最小化到托盘'), 'explicit x11 keeps the item');
+    assert.ok(labels.includes('轻量后台模式'), 'explicit x11 keeps the item');
+  } finally {
+    if (previous === undefined) delete process.env.DSVM_HOME;
+    else process.env.DSVM_HOME = previous;
   }
 });
 
@@ -139,6 +217,11 @@ test('minimize event hides the window and publishes state when enabled', () => {
   const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-win-'));
   const previous = process.env.DSVM_HOME;
   process.env.DSVM_HOME = home;
+  // 固定 x11 环境：Wayland 下最小化相关托盘项本就不存在。
+  const prevSession = process.env.XDG_SESSION_TYPE;
+  const prevWayland = process.env.WAYLAND_DISPLAY;
+  process.env.XDG_SESSION_TYPE = 'x11';
+  delete process.env.WAYLAND_DISPLAY;
   try {
     const req = createRequire(import.meta.url);
     const mainPath = join(PROJECT_ROOT, 'desktop', 'main.js');
@@ -168,5 +251,43 @@ test('minimize event hides the window and publishes state when enabled', () => {
   } finally {
     if (previous === undefined) delete process.env.DSVM_HOME;
     else process.env.DSVM_HOME = previous;
+    if (prevSession === undefined) delete process.env.XDG_SESSION_TYPE;
+    else process.env.XDG_SESSION_TYPE = prevSession;
+    if (prevWayland !== undefined) process.env.WAYLAND_DISPLAY = prevWayland;
   }
+});
+
+test('detectWayland prefers the resolved ozone switch', () => {
+  installNwStub([], {}, []);
+  const req = createRequire(import.meta.url);
+  const mainPath = join(PROJECT_ROOT, 'desktop', 'main.js');
+  delete req.cache[mainPath];
+  const { detectWayland } = req(mainPath) as {
+    detectWayland: (input: {
+      sessionType?: string;
+      waylandDisplay?: string;
+      nwPreArgs?: string;
+      ozonePlatform?: string | null;
+    }) => boolean;
+  };
+  const base = { sessionType: 'wayland', waylandDisplay: 'wayland-0', nwPreArgs: '', ozonePlatform: null };
+  assert.equal(detectWayland(base), true);
+  // 解析出的 ozone 开关压倒一切。
+  assert.equal(detectWayland({ ...base, ozonePlatform: 'x11' }), false);
+  assert.equal(
+    detectWayland({ sessionType: undefined, waylandDisplay: undefined, nwPreArgs: '', ozonePlatform: 'wayland' }),
+    true,
+  );
+  // 显式 x11 压倒 wayland 会话。
+  assert.equal(detectWayland({ ...base, nwPreArgs: '--ozone-platform=x11' }), false);
+  // 纯 x11 会话。
+  assert.equal(
+    detectWayland({ sessionType: 'x11', waylandDisplay: 'wayland-0', nwPreArgs: '', ozonePlatform: null }),
+    false,
+  );
+  // 裸 X（无 Wayland 痕迹）。
+  assert.equal(
+    detectWayland({ sessionType: undefined, waylandDisplay: undefined, nwPreArgs: '', ozonePlatform: null }),
+    false,
+  );
 });

@@ -78,6 +78,48 @@ let tray = null;
 // 主窗口引用：托盘点击复用它，避免重复开窗。
 let mainWin = null;
 
+/**
+ * Chromium 实际解析出的 ozone 平台（`--ozone-platform=wayland|x11`），
+ * ground truth。非 Linux 或读不到时返回 null，上层退回环境变量判断。
+ */
+function effectiveOzonePlatform() {
+  if (process.platform !== 'linux') return null;
+  try {
+    const cmdline = fs.readFileSync('/proc/self/cmdline', 'utf8');
+    const match = cmdline.match(/--ozone-platform=([a-z0-9]+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 纯函数：按 ozone 开关 > 会话类型 > WAYLAND_DISPLAY 的优先级判定。
+ * Chrome API 故意不暴露显示服务器（指纹原因），环境变量是标准通道。
+ */
+function detectWayland({ sessionType, waylandDisplay, nwPreArgs, ozonePlatform }) {
+  if (ozonePlatform) return ozonePlatform === 'wayland';
+  if (/(^|\s)--ozone-platform=x11(\s|$)/.test(nwPreArgs || '')) return false;
+  if (sessionType === 'x11') return false;
+  if (sessionType === 'wayland') return true;
+  return Boolean(waylandDisplay);
+}
+
+/**
+ * 当前窗口是否走原生 Wayland（ozone）。
+ * xdg-shell 没有“被最小化”通知，NW 的 minimize/restore 事件在 Wayland 下不投递，
+ * 所以依赖最小化的托盘项在 Wayland 下直接不建。
+ * manifest 用 --ozone-platform-hint=auto，因此只有显式 --ozone-platform 才算数。
+ */
+function isWaylandWindow() {
+  return detectWayland({
+    sessionType: process.env.XDG_SESSION_TYPE,
+    waylandDisplay: process.env.WAYLAND_DISPLAY,
+    nwPreArgs: process.env.NW_PRE_ARGS,
+    ozonePlatform: effectiveOzonePlatform(),
+  });
+}
+
 function iconPath(file) {
   // main.js 与图标同处应用目录，相对路径即可；被 link/解包后也能用绝对路径兜底。
   const local = path.join(__dirname, file);
@@ -104,30 +146,37 @@ function buildTray() {
   }
 
   const menu = new nw.Menu();
+  const wayland = isWaylandWindow();
 
-  const minimizeItem = new nw.MenuItem({
-    type: 'checkbox',
-    label: '最小化到托盘',
-    checked: settings.minimizeToTray,
-  });
-  minimizeItem.on('click', () => {
-    // NW 在 emit 前已自动翻转 checked（见 menuitem.js handleEvent），这里以自身设置为准
-    // 再显式回写，保证各后端显示一致。
-    settings.minimizeToTray = !settings.minimizeToTray;
-    minimizeItem.checked = settings.minimizeToTray;
-    saveSettings(settings);
-  });
+  if (!wayland) {
+    const minimizeItem = new nw.MenuItem({
+      type: 'checkbox',
+      label: '最小化到托盘',
+      checked: settings.minimizeToTray,
+    });
+    minimizeItem.on('click', () => {
+      // NW 在 emit 前已自动翻转 checked（见 menuitem.js handleEvent），这里以自身设置为准
+      // 再显式回写，保证各后端显示一致。
+      settings.minimizeToTray = !settings.minimizeToTray;
+      minimizeItem.checked = settings.minimizeToTray;
+      saveSettings(settings);
+    });
+    menu.append(minimizeItem);
+  }
 
-  const lightweightItem = new nw.MenuItem({
-    type: 'checkbox',
-    label: '轻量后台模式',
-    checked: settings.lightweightMode,
-  });
-  lightweightItem.on('click', () => {
-    settings.lightweightMode = !settings.lightweightMode;
-    lightweightItem.checked = settings.lightweightMode;
-    saveSettings(settings);
-  });
+  if (!wayland) {
+    const lightweightItem = new nw.MenuItem({
+      type: 'checkbox',
+      label: '轻量后台模式',
+      checked: settings.lightweightMode,
+    });
+    lightweightItem.on('click', () => {
+      settings.lightweightMode = !settings.lightweightMode;
+      lightweightItem.checked = settings.lightweightMode;
+      saveSettings(settings);
+    });
+    menu.append(lightweightItem);
+  }
 
   const closeItem = new nw.MenuItem({
     type: 'checkbox',
@@ -145,8 +194,6 @@ function buildTray() {
     nw.App.quit();
   });
 
-  menu.append(minimizeItem);
-  menu.append(lightweightItem);
   menu.append(closeItem);
   menu.append(new nw.MenuItem({ type: 'separator' }));
   menu.append(quitItem);
@@ -205,6 +252,11 @@ function wireWindow(win) {
     // 主窗口关掉后应用即退出（托盘随 background page 释放）。
     nw.App.quit();
   });
+}
+
+// 单测入口（NW 运行时忽略 exports）。
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { detectWayland, isWaylandWindow };
 }
 
 buildTray();

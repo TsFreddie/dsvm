@@ -169,7 +169,102 @@ function downloadUrl(version: string, asset: NwAsset): string {
   return `${NW_DOWNLOAD_BASE}/${version}/${asset.file(version)}`;
 }
 
-async function downloadToFile(url: string, dest: string): Promise<void> {
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '?';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const text = value >= 100 ? `${Math.round(value)}` : value.toFixed(1);
+  return `${text} ${units[unit]}`;
+}
+
+/** 纯函数：渲染一行进度条文本，便于单测。total 为 null 表示未知总长。 */
+export function renderProgressBar(
+  done: number,
+  total: number | null,
+  width = 24,
+): string {
+  if (total === null || !Number.isFinite(total) || total <= 0) {
+    return `[${'.'.repeat(width)}]`;
+  }
+  const ratio = Math.min(1, Math.max(0, done / total));
+  const filled = Math.round(ratio * width);
+  return `[${'='.repeat(filled)}${'-'.repeat(width - filled)}]`;
+}
+
+export interface ProgressSink {
+  write: (text: string) => void;
+  isTTY: boolean;
+}
+
+/**
+ * 下载进度条：TTY 走 stderr 同行刷新，非 TTY 每 10% 打一行。
+ * 写 stderr，保证 stdout 只留给最终结果。
+ */
+export class DownloadProgress {
+  private done = 0;
+  private readonly startedAt: number;
+  private lastPaint = 0;
+  private lastLoggedStep = -1;
+  private finished = false;
+
+  constructor(
+    private readonly label: string,
+    private readonly total: number | null,
+    private readonly sink: ProgressSink = process.stderr,
+    private readonly now: () => number = Date.now,
+  ) {
+    this.startedAt = now();
+  }
+
+  update(received: number): void {
+    if (this.finished) return;
+    this.done += received;
+    const elapsed = Math.max(1, this.now() - this.startedAt);
+    const speed = `${formatBytes((this.done * 1000) / elapsed)}/s`;
+    if (this.sink.isTTY) {
+      // 节流：最多约 8 次/秒，避免闪烁和刷屏。
+      if (this.now() - this.lastPaint < 120) return;
+      this.lastPaint = this.now();
+      const bar = renderProgressBar(this.done, this.total);
+      const counter =
+        this.total === null
+          ? `${formatBytes(this.done)}`
+          : `${Math.floor((this.done / this.total) * 100)}% ${formatBytes(this.done)}/${formatBytes(this.total)}`;
+      this.sink.write(`\r${this.label} ${bar} ${counter} ${speed}   `);
+      return;
+    }
+    if (this.total === null) return;
+    const step = Math.floor((this.done / this.total) * 10);
+    if (step <= this.lastLoggedStep) return;
+    this.lastLoggedStep = step;
+    this.sink.write(
+      `${this.label}: ${step * 10}% (${formatBytes(this.done)}/${formatBytes(this.total)})\n`,
+    );
+  }
+
+  finish(): void {
+    if (this.finished) return;
+    this.finished = true;
+    const elapsed = ((this.now() - this.startedAt) / 1000).toFixed(1);
+    if (this.sink.isTTY) {
+      const bar = renderProgressBar(this.done, this.total);
+      const counter =
+        this.total === null
+          ? `${formatBytes(this.done)}`
+          : `100% ${formatBytes(this.done)}/${formatBytes(this.total)}`;
+      this.sink.write(`\r${this.label} ${bar} ${counter} in ${elapsed}s\n`);
+    } else {
+      this.sink.write(`${this.label}: done (${formatBytes(this.done)} in ${elapsed}s)\n`);
+    }
+  }
+}
+
+async function downloadToFile(url: string, dest: string, label: string): Promise<void> {
   let response: Response;
   try {
     response = await fetch(url);
@@ -179,6 +274,9 @@ async function downloadToFile(url: string, dest: string): Promise<void> {
   if (!response.ok || !response.body) {
     throw new DsvmError(`download failed: ${url} (HTTP ${response.status})`);
   }
+  const totalRaw = Number(response.headers.get('content-length'));
+  const total = Number.isFinite(totalRaw) && totalRaw > 0 ? totalRaw : null;
+  const progress = new DownloadProgress(label, total);
   mkdirp(dirname(dest));
   const out = createWriteStream(dest);
   try {
@@ -186,7 +284,14 @@ async function downloadToFile(url: string, dest: string): Promise<void> {
       new WritableStream({
         write: (chunk) =>
           new Promise<void>((resolve, reject) => {
-            out.write(Buffer.from(chunk), (error) => (error ? reject(error) : resolve()));
+            const bytes = chunk.byteLength;
+            out.write(Buffer.from(chunk), (error) => {
+              if (error) reject(error);
+              else {
+                progress.update(bytes);
+                resolve();
+              }
+            });
           }),
         close: () =>
           new Promise<void>((resolve, reject) => {
@@ -197,6 +302,7 @@ async function downloadToFile(url: string, dest: string): Promise<void> {
         },
       }),
     );
+    progress.finish();
   } finally {
     out.destroy();
   }
@@ -247,7 +353,7 @@ export async function installNwVersion(version: string): Promise<string> {
   const archivePath = join(tmpdir(), `dsvm-nwjs-${version}-${Date.now()}`, archiveName);
   try {
     mkdirp(tmpDir);
-    await downloadToFile(downloadUrl(version, asset), archivePath);
+    await downloadToFile(downloadUrl(version, asset), archivePath, `downloading nw.js SDK ${version}`);
     await extractArchive(archivePath, tmpDir, asset.ext);
     if (!existsSync(join(tmpDir, asset.binary.replace('VERSION', version)))) {
       const entries = existsSync(tmpDir) ? readdirSync(tmpDir) : [];

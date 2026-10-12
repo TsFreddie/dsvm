@@ -4,10 +4,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCli, tempDir } from './helpers.js';
 import {
+  DownloadProgress,
   fetchLatestNwVersion,
+  formatBytes,
   nwAssetFor,
   nwBinaryFor,
   nwInstallDir,
+  renderProgressBar,
 } from '../src/desktop/nwjs.js';
 import {
   installShortcut,
@@ -61,6 +64,40 @@ test('linuxDesktopEntry launches nw directly with the app dir', () => {
   assert.match(entry, /^Icon=\/opt\/dsvm\/desktop\/icon\.png$/m);
   assert.match(entry, /^Terminal=false$/m);
   assert.ok(!entry.includes('dsvm.js'), 'shortcuts must not go through dsvm');
+});
+
+test('progress helpers format bytes and bars', () => {
+  assert.equal(formatBytes(0), '0.0 B');
+  assert.equal(formatBytes(512), '512 B');
+  assert.equal(formatBytes(1536), '1.5 KB');
+  assert.equal(formatBytes(221185670), '211 MB');
+  assert.equal(renderProgressBar(0, 100), `[${'-'.repeat(24)}]`);
+  assert.equal(renderProgressBar(100, 100), `[${'='.repeat(24)}]`);
+  assert.equal(renderProgressBar(50, 100), `[${'='.repeat(12)}${'-'.repeat(12)}]`);
+  assert.equal(renderProgressBar(5, null), `[${'.'.repeat(24)}]`);
+});
+
+test('DownloadProgress logs steps without a TTY and refreshes with one', () => {
+  const lines: string[] = [];
+  let clock = 0;
+  const plain = new DownloadProgress('downloading x', 100, { write: (s) => lines.push(s), isTTY: false }, () => clock);
+  clock = 1000;
+  plain.update(5);
+  plain.update(10);
+  clock = 2000;
+  plain.finish();
+  assert.ok(lines.some((line) => line.includes('10%')), lines.join(''));
+  assert.ok(lines.at(-1)?.includes('done'), lines.join(''));
+
+  const frames: string[] = [];
+  const tty = new DownloadProgress('downloading x', 100, { write: (s) => frames.push(s), isTTY: true }, () => clock);
+  clock = 3000;
+  tty.update(50);
+  clock = 4000;
+  tty.finish();
+  assert.ok(frames[0]?.startsWith('\r'), frames.join(''));
+  assert.ok(frames[0]?.includes('50%'), frames.join(''));
+  assert.ok(frames.at(-1)?.endsWith('\n'), frames.join(''));
 });
 
 test('desktop help and unknown subcommands', async () => {

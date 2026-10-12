@@ -144,15 +144,7 @@ What "the service" means per platform:
 | restart | `systemctl --user restart` | `launchctl kickstart -k` | stop + `Start-ScheduledTask` |
 | logs | `journalctl --user -u dsvm.service` | `~/.dsvm/service/logs/service.err.log` | task history / status |
 
-All three definitions ultimately run the same command:
-
-```
-<node> <dsvm-install>/bin/dsvm.js web --port 7766 --no-open
-```
-
-with `DSVM_SERVICE=1` and the `DSVM_HOME` that was active at install time. This
-is why changing dsh versions only needs `dsvm service restart` — the unit itself
-never names a dsh version. `dsvm use` and `dsvm update` print a reminder when
+`dsvm use` and `dsvm update` print a reminder when
 the service is running.
 
 `install` records the absolute paths of the dsvm launcher, node, the dsvm home,
@@ -182,7 +174,8 @@ and minimize-on-close, plus quit. On Linux the app defaults to Wayland
 (`--ozone-platform-hint=auto`) with Wayland IME support
 (`--enable-wayland-ime --wayland-text-input-version=3`). Window and tray
 icons reuse the official dsh whale mark (`desktop/icon.svg/png`).
-Shortcuts launch the cached nw.js binary directly, never through dsvm:
+Shortcuts launch the cached nw.js binary directly, never through dsvm, via a
+stable path (`~/.dsvm/desktop/nwjs/current/`) that survives updates:
 Linux writes `~/.local/share/applications/dsvm-desktop.desktop`, Windows
 creates Start Menu + Desktop links, macOS drops a minimal `.app` bundle in
 `~/Applications` (default dock icon; custom icns is best-effort).

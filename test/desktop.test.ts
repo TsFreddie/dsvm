@@ -1,15 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { PROJECT_ROOT, runCli, tempDir } from './helpers.js';
 import {
   DownloadProgress,
   fetchLatestNwVersion,
   formatBytes,
+  migrateLegacyCache,
   nwAssetFor,
-  nwBinaryFor,
+  nwAsset,
+  nwBinary,
   nwInstallDir,
+  nwLegacyBinaryFor,
   renderProgressBar,
 } from '../src/desktop/nwjs.js';
 import {
@@ -18,26 +21,53 @@ import {
   linuxDesktopFile,
 } from '../src/desktop/shortcut.js';
 
-test('nwAssetFor maps platforms to SDK artifacts', () => {
+test('nwAssetFor maps platforms to SDK artifacts with a stable binary path', () => {
   const linux = nwAssetFor('linux', 'x64');
   assert.equal(linux.asset, 'linux-x64');
   assert.equal(linux.ext, 'tar.gz');
   assert.equal(linux.file('v0.118.0'), 'nwjs-sdk-v0.118.0-linux-x64.tar.gz');
-  assert.match(nwBinaryFor('v0.118.0', linux), /nwjs-sdk-v0\.118\.0-linux-x64[\\/]nw$/);
+  assert.ok(!linux.binary.includes('0.118.0'), 'binary path must not contain a version');
 
   const win = nwAssetFor('win32', 'x64');
   assert.equal(win.asset, 'win-x64');
   assert.equal(win.ext, 'zip');
   assert.equal(win.file('v0.118.0'), 'nwjs-sdk-v0.118.0-win-x64.zip');
-  assert.match(nwBinaryFor('v0.118.0', win), /nw\.exe$/);
+  assert.match(win.binary, /nw\.exe$/);
 
   const mac = nwAssetFor('darwin', 'arm64');
   assert.equal(mac.asset, 'osx-arm64');
   assert.equal(mac.ext, 'zip');
-  assert.match(nwBinaryFor('v0.118.0', mac), /nwjs\.app[\\/]Contents[\\/]MacOS[\\/]nwjs$/);
+  assert.match(mac.binary, /nwjs\.app[\\/]Contents[\\/]MacOS[\\/]nwjs$/);
 
   assert.throws(() => nwAssetFor('sunos' as NodeJS.Platform, 'x64'), /does not support platform/);
   assert.ok(nwInstallDir('v0.118.0').endsWith(join('desktop', 'nwjs', 'v0.118.0')));
+  // 稳定路径与旧版路径指向同一文件（仅目录布局不同）。
+  assert.equal(
+    nwLegacyBinaryFor('v0.118.0', linux),
+    join(nwInstallDir('v0.118.0'), 'nwjs-sdk-v0.118.0-linux-x64', 'nw'),
+  );
+});
+
+test('migrateLegacyCache moves an old versioned tree into the stable path', () => {
+  const home = tempDir('desktop-migrate');
+  const previous = process.env.DSVM_HOME;
+  process.env.DSVM_HOME = home;
+  try {
+    const asset = nwAsset();
+    const legacyTop = join(nwInstallDir('v9.9.9'), `nwjs-sdk-v9.9.9-${asset.asset}`);
+    mkdirSync(join(legacyTop, dirname(asset.binary.replace(/^dist[/\\]/, ''))), { recursive: true });
+    const legacyBin = nwLegacyBinaryFor('v9.9.9', asset);
+    mkdirSync(dirname(legacyBin), { recursive: true });
+    writeFileSync(legacyBin, 'fake-nw');
+    writeFileSync(join(home, 'desktop', 'nwjs', 'version.json'), '{"version":"v9.9.9"}\n');
+    assert.equal(migrateLegacyCache('v9.9.9', asset), true);
+    assert.equal(readFileSync(nwBinary(asset), 'utf8'), 'fake-nw');
+    assert.equal(existsSync(nwInstallDir('v9.9.9')), false);
+    assert.equal(migrateLegacyCache('v9.9.9', asset), false);
+  } finally {
+    if (previous === undefined) delete process.env.DSVM_HOME;
+    else process.env.DSVM_HOME = previous;
+  }
 });
 
 test('fetchLatestNwVersion prefers stable and validates shape', async () => {

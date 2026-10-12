@@ -195,10 +195,7 @@ Examples:
   dsvm update                     update the dist-tag that is currently in use
   dsvm service install            install the systemd/launchd/Task Scheduler unit
   dsvm service enable             start the service now and at login
-  dsvm open                       open the running service in a browser
-
-The service definition runs \`dsvm web\`, so after \`dsvm use\` or \`dsvm update\`
-a \`dsvm service restart\` applies the new version without editing the unit.`;
+  dsvm open                       open the running service in a browser`;
 
 const COMMAND_HELP: Record<string, string> = {
   install: 'Usage: dsvm install [version|tag] [--force]\n\nInstall a dsh version or dist-tag (default: latest).',

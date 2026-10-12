@@ -133,14 +133,7 @@ dsvm service enable | disable | start | stop | restart | status [--json] | url |
 | restart | `systemctl --user restart` | `launchctl kickstart -k` | stop + `Start-ScheduledTask` |
 | 日志 | `journalctl --user -u dsvm.service` | `~/.dsvm/service/logs/service.err.log` | 任务历史 / status |
 
-三种定义最终都执行同一条命令：
-
-```
-<node> <dsvm 安装目录>/bin/dsvm.js web --port 7766 --no-open
-```
-
-并注入 `DSVM_SERVICE=1` 与安装时的 `DSVM_HOME`。因此切换 dsh 版本只需要
-`dsvm service restart`，unit 本身永远不写死 dsh 版本。服务正在运行时执行
+服务正在运行时执行
 `dsvm use` / `dsvm update` 会给出重启提示。
 
 `install` 会记录 dsvm 启动脚本、node、dsvm home 和安装时 PATH 的绝对路径；如果
@@ -168,6 +161,7 @@ Wayland（`--ozone-platform-hint=auto`）并支持 Wayland 输入法
 dsvm（避免 Linux 图标归属问题）：Linux 写
 `~/.local/share/applications/dsvm-desktop.desktop`，Windows 建开始菜单 + 桌面图标，
 macOS 在 `~/Applications` 放最小 `.app`（默认 dock 图标，icns 为最佳努力）。
+快捷方式走稳定路径（`~/.dsvm/desktop/nwjs/current/`），更新不断。
 
 ### 打开
 

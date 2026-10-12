@@ -1,5 +1,4 @@
 import {
-  cpSync,
   createWriteStream,
   existsSync,
   readdirSync,
@@ -46,7 +45,10 @@ export interface NwAsset {
   asset: string;
   /** `tar.gz`（Linux）或 `zip`（Windows/macOS）。 */
   ext: 'tar.gz' | 'zip';
-  /** 解包目录下可执行文件的相对路径。 */
+  /**
+   * 稳定缓存目录（`current/dist/`）下可执行文件的相对路径。
+   * 与版本无关，所以快捷方式指过去后 update 也不会断。
+   */
   binary: string;
   /** dl.nwjs.io 上的压缩包文件名（不含版本前缀外的其它成分）。 */
   file: (version: string) => string;
@@ -64,7 +66,7 @@ export function nwAssetFor(platform: NodeJS.Platform, arch: string): NwAsset {
       return {
         asset,
         ext: 'tar.gz',
-        binary: join(`nwjs-${flavor}-VERSION-${asset}`, 'nw'),
+        binary: join('dist', 'nw'),
         file: (version) => `nwjs-${flavor}-${version}-${asset}.tar.gz`,
       };
     }
@@ -75,7 +77,7 @@ export function nwAssetFor(platform: NodeJS.Platform, arch: string): NwAsset {
       return {
         asset,
         ext: 'zip',
-        binary: join(`nwjs-${flavor}-VERSION-${asset}`, 'nw.exe'),
+        binary: join('dist', 'nw.exe'),
         file: (version) => `nwjs-${flavor}-${version}-${asset}.zip`,
       };
     }
@@ -85,13 +87,7 @@ export function nwAssetFor(platform: NodeJS.Platform, arch: string): NwAsset {
       return {
         asset,
         ext: 'zip',
-        binary: join(
-          `nwjs-${flavor}-VERSION-${asset}`,
-          'nwjs.app',
-          'Contents',
-          'MacOS',
-          'nwjs',
-        ),
+        binary: join('dist', 'nwjs.app', 'Contents', 'MacOS', 'nwjs'),
         file: (version) => `nwjs-${flavor}-${version}-${asset}.zip`,
       };
     }
@@ -124,13 +120,29 @@ export function desktopAppDir(): string {
   throw new DsvmError('cannot locate the built-in dsvm desktop app (desktop/package.json)');
 }
 
+/** 旧版按版本存放的目录（仅用于一次性迁移）。 */
 export function nwInstallDir(version: string): string {
   return join(nwCacheRoot(), version);
 }
 
-/** 可执行文件绝对路径（binary 模板中的 VERSION 占位替换为实际版本）。 */
-export function nwBinaryFor(version: string, asset: NwAsset = nwAsset()): string {
-  return join(nwInstallDir(version), asset.binary.replace('VERSION', version));
+/** 在线版本的稳定目录：`.../nwjs/current/dist/`，快捷方式永远指这里。 */
+export function nwLiveDir(): string {
+  return join(nwCacheRoot(), 'current');
+}
+
+/** 可执行文件绝对路径（稳定路径，与版本无关）。 */
+export function nwBinary(asset: NwAsset = nwAsset()): string {
+  return join(nwLiveDir(), asset.binary);
+}
+
+/** binary 去掉开头的稳定目录名（`dist/`），得到压缩包内顶层目录下的相对路径。 */
+function distRel(asset: NwAsset): string {
+  return asset.binary.replace(/^dist[/\\]/, '');
+}
+
+/** 旧版路径的可执行文件（迁移用）。 */
+export function nwLegacyBinaryFor(version: string, asset: NwAsset = nwAsset()): string {
+  return join(nwInstallDir(version), `nwjs-${NW_FLAVOR}-${version}-${asset.asset}`, distRel(asset));
 }
 
 interface VersionsJson {
@@ -337,53 +349,26 @@ async function extractArchive(archive: string, destDir: string, ext: 'tar.gz' | 
   }
 }
 
-/**
- * 下载并解包指定版本的 nw.js SDK 到缓存。幂等：目标目录已存在且二进制齐全则跳过。
- * 返回版本号。
- */
-export async function installNwVersion(version: string): Promise<string> {
-  const asset = nwAsset();
-  const destDir = nwInstallDir(version);
-  const binary = nwBinaryFor(version, asset);
-  if (existsSync(binary)) return version;
-
-  rmrf(`${destDir}.tmp`);
-  const tmpDir = `${destDir}.tmp`;
-  const archiveName = asset.file(version);
-  const archivePath = join(tmpdir(), `dsvm-nwjs-${version}-${Date.now()}`, archiveName);
+/** 解包目录的唯一顶层目录（nw.js 压缩包里就是一个版本化目录）。 */
+function topLevelDir(dir: string): string {
+  let entries: string[] = [];
   try {
-    mkdirp(tmpDir);
-    await downloadToFile(downloadUrl(version, asset), archivePath, `downloading nw.js SDK ${version}`);
-    await extractArchive(archivePath, tmpDir, asset.ext);
-    if (!existsSync(join(tmpDir, asset.binary.replace('VERSION', version)))) {
-      const entries = existsSync(tmpDir) ? readdirSync(tmpDir) : [];
-      throw new DsvmError(
-        `extracted nw.js ${version} but the binary is missing (top-level: ${entries.join(', ') || '(empty)'})`,
-      );
-    }
-    // 原子替换：跨文件系统 rename 可能失败，失败则退回递归复制。
-    try {
-      rmrf(destDir);
-      renameSync(tmpDir, destDir);
-    } catch {
-      rmrf(destDir);
-      cpSync(tmpDir, destDir, { recursive: true });
-      rmrf(tmpDir);
-    }
-  } finally {
-    rmrf(tmpDir);
-    try {
-      rmSync(dirname(archivePath), { recursive: true, force: true });
-    } catch {
-      // Best effort.
-    }
+    entries = readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    // Fall through to the error below.
   }
-  mkdirp(nwCacheRoot());
-  writeFileSync(nwVersionFile(), `${JSON.stringify({ version }, null, 2)}\n`);
-  return version;
+  if (entries.length !== 1) {
+    throw new DsvmError(
+      `unexpected nw.js archive layout (top-level: ${entries.join(', ') || '(empty)'})`,
+    );
+  }
+  return join(dir, entries[0] as string);
 }
 
-function pruneOldVersions(keep: string): void {
+/** 删除旧版按版本存放的残留目录（`v*`），稳定目录不受影响。 */
+function pruneLegacyDirs(): void {
   let entries: string[] = [];
   try {
     entries = readdirSync(nwCacheRoot(), { withFileTypes: true })
@@ -392,16 +377,78 @@ function pruneOldVersions(keep: string): void {
   } catch {
     return;
   }
-  for (const entry of entries) {
-    if (entry !== keep) rmrf(join(nwCacheRoot(), entry));
+  for (const entry of entries) rmrf(join(nwCacheRoot(), entry));
+}
+
+/**
+ * 下载并解包指定版本的 nw.js SDK 到稳定目录（`current/dist/`）。
+ * 幂等：已是该版本且二进制齐全则跳过。快捷方式指稳定路径，更新不断。
+ */
+export async function installNwVersion(version: string): Promise<string> {
+  const asset = nwAsset();
+  if (readCachedVersion() === version && existsSync(nwBinary(asset))) return version;
+
+  const tmpRoot = `${nwLiveDir()}.tmp`;
+  rmrf(tmpRoot);
+  const archiveName = asset.file(version);
+  const archivePath = join(tmpdir(), `dsvm-nwjs-${version}-${Date.now()}`, archiveName);
+  try {
+    mkdirp(tmpRoot);
+    await downloadToFile(downloadUrl(version, asset), archivePath, `downloading nw.js SDK ${version}`);
+    await extractArchive(archivePath, tmpRoot, asset.ext);
+    // 顶层版本化目录名改成稳定的 `dist`，之后 update 只换内容不换路径。
+    const dist = join(tmpRoot, 'dist');
+    rmrf(dist);
+    renameSync(topLevelDir(tmpRoot), dist);
+    if (!existsSync(join(dist, distRel(asset)))) {
+      throw new DsvmError(`extracted nw.js ${version} but the binary is missing`);
+    }
+    try {
+      rmrf(nwLiveDir());
+      renameSync(tmpRoot, nwLiveDir());
+    } catch (error) {
+      throw new DsvmError(
+        `cannot activate nw.js ${version} (${(error as Error).message}); close the desktop app and retry`,
+      );
+    }
+  } finally {
+    rmrf(tmpRoot);
+    try {
+      rmSync(dirname(archivePath), { recursive: true, force: true });
+    } catch {
+      // Best effort.
+    }
   }
+  mkdirp(nwCacheRoot());
+  writeFileSync(nwVersionFile(), `${JSON.stringify({ version }, null, 2)}\n`);
+  pruneLegacyDirs();
+  return version;
+}
+
+/**
+ * 把旧版布局（`v<version>/nwjs-sdk-v<version>-<asset>/`）原地搬进稳定目录，
+ * 不用重新下载。搬成功返回 true；无需搬返回 false。
+ */
+export function migrateLegacyCache(version: string, asset: NwAsset = nwAsset()): boolean {
+  if (existsSync(nwBinary(asset))) return false;
+  const legacyTop = join(nwInstallDir(version), `nwjs-${NW_FLAVOR}-${version}-${asset.asset}`);
+  if (!existsSync(join(legacyTop, distRel(asset)))) return false;
+  const tmpRoot = `${nwLiveDir()}.tmp`;
+  rmrf(tmpRoot);
+  mkdirp(tmpRoot);
+  renameSync(legacyTop, join(tmpRoot, 'dist'));
+  rmrf(nwLiveDir());
+  renameSync(tmpRoot, nwLiveDir());
+  pruneLegacyDirs();
+  return true;
 }
 
 /**
  * 确保缓存中有可用的 nw.js SDK：
- * - 已有缓存：直接用（update 流程除外）；
- * - 没有缓存：自动下载最新版 SDK。
- * 返回 { version, binary }。
+ * - 稳定目录可用：直接用（update 流程除外）；
+ * - 只有旧版目录：原地迁移，不重新下载；
+ * - 都没有：自动下载最新版 SDK。
+ * 返回 { version, binary }，binary 永远是稳定路径。
  */
 export async function ensureNwjs(options: { update?: boolean } = {}): Promise<{
   version: string;
@@ -409,16 +456,21 @@ export async function ensureNwjs(options: { update?: boolean } = {}): Promise<{
 }> {
   const asset = nwAsset();
   const cached = readCachedVersion();
-  if (cached && !options.update && existsSync(nwBinaryFor(cached, asset))) {
-    return { version: cached, binary: nwBinaryFor(cached, asset) };
+  if (!options.update && cached && existsSync(nwBinary(asset))) {
+    return { version: cached, binary: nwBinary(asset) };
+  }
+  if (!options.update && cached && migrateLegacyCache(cached, asset)) {
+    return { version: cached, binary: nwBinary(asset) };
+  }
+  if (!options.update && existsSync(nwBinary(asset))) {
+    return { version: cached ?? 'unknown', binary: nwBinary(asset) };
   }
   const latest = await fetchLatestNwVersion();
-  if (cached === latest && existsSync(nwBinaryFor(latest, asset))) {
-    return { version: latest, binary: nwBinaryFor(latest, asset) };
+  if (cached === latest && existsSync(nwBinary(asset))) {
+    return { version: latest, binary: nwBinary(asset) };
   }
   await installNwVersion(latest);
-  pruneOldVersions(latest);
-  return { version: latest, binary: nwBinaryFor(latest, asset) };
+  return { version: latest, binary: nwBinary(asset) };
 }
 
 /** 删除整个 nw.js 缓存（含 version.json）。 */

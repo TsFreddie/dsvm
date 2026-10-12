@@ -197,9 +197,6 @@ export function serviceHelpText(): string {
   return [
     'Manage the dsvm background service that serves the dsh web UI.',
     '',
-    'The service runs `dsvm web --port <port> --no-open` through the platform',
-    'service manager, so switching dsh versions only needs `dsvm service restart`.',
-    '',
     'Subcommands:',
     '  install [--port <port>] [--host <host>] [--dir <dir>] [--force]',
     '                       Install the service definition (default port 7766)',

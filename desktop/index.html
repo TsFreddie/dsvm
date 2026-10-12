@@ -84,9 +84,7 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     let abortGrace = null;    // loadabort 延迟判失败：等一等，看是否有 loadstop 跟上（幻影 abort）
     let loadTimer = null;
     let retryTimer = null;
-    let hiddenSince = null;   // 开始持续不可见的时间戳（仅用于连接重试门控）
-    let minimizedNow = false; // main.js 同步的最小化状态（轻量模式的唯一依据）
-    let minimizedSince = null; // 开始持续最小化的时间戳
+    let hiddenSince = null;   // 开始持续不可见的时间戳
 
     function dsvmHome() {
       return process.env.DSVM_HOME || path.join(os.homedir(), '.dsvm');
@@ -102,7 +100,7 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       }
     }
 
-    // main.js（bg）维护的最小化状态。不用 visibility 判断：最小化有明确回调。
+    // main.js（bg）维护的最小化状态（有事件的环境才准；有些环境 minimize 事件不投递）。
     function readMinimized() {
       try {
         const raw = fs.readFileSync(path.join(dsvmHome(), 'desktop', 'runtime-state.json'), 'utf8');
@@ -110,6 +108,12 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       } catch {
         return false;
       }
+    }
+
+    // 页面是否不可见：visibility 为主（最小化/隐藏都会变 hidden），
+    // bg 的最小化状态为辅（事件可用的环境）。
+    function isHiddenNow() {
+      return document.visibilityState !== 'visible' || readMinimized();
     }
 
     /** 读本地服务地址；读不到 / 进程已死都返回 null（视为未启用）。 */
@@ -225,13 +229,13 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       retryTimer = setTimeout(connect, state === 'ready' ? 15000 : RETRY_MS);
     }
 
-    /** 轻量后台模式：持续最小化超阈值后卸载 webview，回到连接中页释放前端资源。 */
+    /** 轻量后台模式：持续不可见超阈值后卸载 webview，回到连接中页释放前端资源。 */
     function maybeUnloadForLightweight() {
-      if (!minimizedNow) return;
-      if (minimizedSince === null) minimizedSince = Date.now();
+      if (!isHiddenNow()) return;
+      if (hiddenSince === null) hiddenSince = Date.now();
       if (!readSettings().lightweightMode) return;
       if (currentUrl === null && state !== 'ready') return;
-      if (Date.now() - minimizedSince < HIDE_UNLOAD_MS) return;
+      if (Date.now() - hiddenSince < HIDE_UNLOAD_MS) return;
       currentUrl = null;
       if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
       if (abortGrace) { clearTimeout(abortGrace); abortGrace = null; }
@@ -298,6 +302,8 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     });
 
     // 可见性变化：变为可见的一瞬间立刻重试一次；不可见时开始计时。
+    // minimize 事件不可靠的环境里，这里也是“最小化到托盘”的兜底：
+    // 不可见即藏窗口（已最小化的窗口藏起=只剩托盘；普通切后台不受影响因为还 visible）。
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         hiddenSince = null;
@@ -307,28 +313,16 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
           const url = readServiceUrl();
           if (url && url !== currentUrl) connect();
         }
-      } else if (hiddenSince === null) {
-        hiddenSince = Date.now();
+      } else {
+        if (hiddenSince === null) hiddenSince = Date.now();
+        try {
+          if (readSettings().minimizeToTray) nw.Window.get().hide();
+        } catch { /* ignore */ }
       }
     });
 
-    // 最小化状态轮询与轻量卸载检查：1s 一次，开销可忽略。
-    // 从最小化恢复的一瞬间，若不在就绪态立刻重试一次。
+    // 轻量卸载检查：1s 一次，开销可忽略。
     setInterval(() => {
-      const wasMinimized = minimizedNow;
-      minimizedNow = readMinimized();
-      if (minimizedNow) {
-        if (minimizedSince === null) minimizedSince = Date.now();
-      } else {
-        const justRestored = wasMinimized && minimizedSince !== null;
-        minimizedSince = null;
-        if (justRestored && state !== 'ready') connect();
-        else if (justRestored) {
-          // 就绪态恢复也顺手确认一次 URL 是否过期（token 可能已轮换）。
-          const url = readServiceUrl();
-          if (url && url !== currentUrl) connect();
-        }
-      }
       maybeUnloadForLightweight();
     }, 1000);
 

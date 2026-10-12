@@ -159,8 +159,12 @@ test('lightweight mode follows minimize state via runtime-state.json', () => {
   assert.ok(main.includes("win.on('restore'"), 'tracks restore');
   assert.ok(main.includes('runtime-state.json'), 'publishes minimize state for the page');
   const html = readFileSync(join(root, 'index.html'), 'utf8');
-  assert.ok(html.includes('readMinimized'), 'page polls minimize state');
-  assert.ok(html.includes('minimizedSince'), 'unload timing is minimize-based');
+  assert.ok(html.includes('isHiddenNow'), 'unload uses visibility with minimize state as backup');
+  assert.ok(html.includes('hiddenSince'), 'unload timing is hidden-duration based');
+  assert.ok(
+    html.includes('minimizeToTray) nw.Window.get().hide()'),
+    'page hides itself when minimize events are missing',
+  );
   assert.ok(html.includes('.terminate('), 'unload kills the guest renderer');
   assert.ok(html.includes('open-external.js'), 'external links go through the shared opener');
 });

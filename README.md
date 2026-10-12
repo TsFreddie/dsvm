@@ -155,10 +155,10 @@ location means running `dsvm service install --force` again.
 
 ```
 dsvm desktop [--nw-switch...]         # cache the SDK if needed and launch; extra switches
-                                      # pass through to nw, e.g. --ozone-platform=wayland
-                                      # to force native Wayland over XWayland
+                                      # pass through to nw, e.g. --ozone-platform=x11
+                                      # for XWayland (auto already means native Wayland)
 dsvm desktop install [--nw-switch...] # cache the SDK and create a shortcut with those
-                                      # switches baked in, e.g. install --ozone-platform=wayland
+                                      # switches baked in, e.g. install --ozone-platform=x11
 dsvm desktop uninstall                # remove the shortcut and delete the SDK cache
 dsvm desktop update                   # install the newest SDK when one is available
 ```

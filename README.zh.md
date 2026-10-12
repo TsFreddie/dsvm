@@ -143,9 +143,9 @@ dsvm 移动了位置，需要重新执行 `dsvm service install --force`。
 
 ```
 dsvm desktop [--nw 开关...]         # 缺缓存则自动下载 SDK 并启动，多余开关透传给 nw
-                                   # 如：dsvm desktop --ozone-platform=wayland（强制原生 Wayland）
+                                   # 如：dsvm desktop --ozone-platform=x11（走 XWayland，默认 auto 就是原生 Wayland）
 dsvm desktop install [--nw 开关...] # 缓存 SDK 并创建用户快捷方式，开关会烘进快捷方式
-                                    # 如：dsvm desktop install --ozone-platform=wayland
+                                    # 如：dsvm desktop install --ozone-platform=x11
 dsvm desktop uninstall              # 删除快捷方式并清理 SDK 缓存
 dsvm desktop update                 # 有新版 SDK 时更新
 ```

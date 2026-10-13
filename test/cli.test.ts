@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { addFakeDsh, runCli, setCurrent, tempDir, writeConfig } from './helpers.js';
 
@@ -21,6 +21,42 @@ test('unknown commands fail with usage', async () => {
   const result = await runCli(home, ['frobnicate']);
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /unknown command "frobnicate"/);
+});
+
+test('bare dsvm runs open by default and follows --default-desktop/--default-open', async () => {
+  const home = tempDir('cli');
+
+  // No configuration yet: bare `dsvm` and stray flags route to `dsvm open`,
+  // which fails here because no service is installed.
+  const asOpen = await runCli(home, []);
+  assert.notEqual(asOpen.code, 0);
+  assert.match(asOpen.stderr, /service/);
+  const flagOpen = await runCli(home, ['--print']);
+  assert.notEqual(flagOpen.code, 0);
+  assert.match(flagOpen.stderr, /service/);
+
+  const toDesktop = await runCli(home, ['--default-desktop']);
+  assert.equal(toDesktop.code, 0, toDesktop.stderr);
+  assert.match(toDesktop.stdout, /dsvm desktop/);
+  assert.equal(
+    (JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')) as { defaultCommand?: string }).defaultCommand,
+    'desktop',
+  );
+
+  const rejected = await runCli(home, ['--default-open', 'extra']);
+  assert.notEqual(rejected.code, 0);
+  assert.match(rejected.stderr, /usage: dsvm --default-open/);
+  // The rejected invocation must not have changed the stored default.
+  assert.equal(
+    (JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')) as { defaultCommand?: string }).defaultCommand,
+    'desktop',
+  );
+
+  const toOpen = await runCli(home, ['--default-open']);
+  assert.equal(toOpen.code, 0, toOpen.stderr);
+  const backToOpen = await runCli(home, ['--print']);
+  assert.notEqual(backToOpen.code, 0);
+  assert.match(backToOpen.stderr, /service/);
 });
 
 test('list and current reflect the active version', async () => {

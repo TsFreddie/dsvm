@@ -18,9 +18,9 @@ function settingsFile() {
 }
 
 const DEFAULT_SETTINGS = {
-  minimizeToTray: false, // 最小化到托盘
-  lightweightMode: false, // 轻量后台模式
-  closeToMinimize: false, // 关闭时最小化
+  minimizeToTray: false, // 最小化到托盘（依赖 minimize 事件，仅 x11）
+  closeToTray: false, // 关闭到托盘
+  lightweightMode: false, // 后台轻量模式
 };
 
 function loadSettings() {
@@ -28,8 +28,9 @@ function loadSettings() {
     const parsed = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
     return {
       minimizeToTray: parsed.minimizeToTray === true,
+      // 旧键 closeToMinimize 迁移为 closeToTray。
+      closeToTray: parsed.closeToTray === true || parsed.closeToMinimize === true,
       lightweightMode: parsed.lightweightMode === true,
-      closeToMinimize: parsed.closeToMinimize === true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -109,7 +110,8 @@ function detectWayland({ sessionType, waylandDisplay, nwPreArgs, ozonePlatform }
 /**
  * 当前窗口是否走原生 Wayland（ozone）。
  * xdg-shell 没有“被最小化”通知，NW 的 minimize/restore 事件在 Wayland 下不投递，
- * 所以依赖最小化的托盘项在 Wayland 下直接不建。
+ * 所以“最小化到托盘”不建；close 事件和可见性都正常，因此“关闭到托盘”与
+ * “后台轻量模式”照常提供。
  * manifest 用 --ozone-platform-hint=auto，因此只有显式 --ozone-platform 才算数。
  */
 function isWaylandWindow() {
@@ -149,6 +151,7 @@ function buildTray() {
   const menu = new nw.Menu();
   const wayland = isWaylandWindow();
 
+  // “最小化到托盘”依赖 minimize 事件，xdg-shell 不投递，所以只在非 Wayland 建。
   if (!wayland) {
     const minimizeItem = new nw.MenuItem({
       type: 'checkbox',
@@ -165,37 +168,37 @@ function buildTray() {
     menu.append(minimizeItem);
   }
 
-  if (!wayland) {
-    const lightweightItem = new nw.MenuItem({
-      type: 'checkbox',
-      label: '轻量后台模式',
-      checked: settings.lightweightMode,
-    });
-    lightweightItem.on('click', () => {
-      settings.lightweightMode = !settings.lightweightMode;
-      lightweightItem.checked = settings.lightweightMode;
-      saveSettings(settings);
-    });
-    menu.append(lightweightItem);
-  }
-
+  // “关闭到托盘”只需要 close 事件，Wayland 同样投递；托盘入口因此在两个平台都可用。
   const closeItem = new nw.MenuItem({
     type: 'checkbox',
-    label: '关闭时最小化',
-    checked: settings.closeToMinimize,
+    label: '关闭到托盘',
+    checked: settings.closeToTray,
   });
   closeItem.on('click', () => {
-    settings.closeToMinimize = !settings.closeToMinimize;
-    closeItem.checked = settings.closeToMinimize;
+    settings.closeToTray = !settings.closeToTray;
+    closeItem.checked = settings.closeToTray;
     saveSettings(settings);
   });
+  menu.append(closeItem);
+
+  // “后台轻量模式”只看窗口可见性（隐藏即开始计时），不依赖 minimize 事件。
+  const lightweightItem = new nw.MenuItem({
+    type: 'checkbox',
+    label: '后台轻量模式',
+    checked: settings.lightweightMode,
+  });
+  lightweightItem.on('click', () => {
+    settings.lightweightMode = !settings.lightweightMode;
+    lightweightItem.checked = settings.lightweightMode;
+    saveSettings(settings);
+  });
+  menu.append(lightweightItem);
 
   const quitItem = new nw.MenuItem({ type: 'normal', label: '退出' });
   quitItem.on('click', () => {
     nw.App.quit();
   });
 
-  menu.append(closeItem);
   menu.append(new nw.MenuItem({ type: 'separator' }));
   menu.append(quitItem);
   tray.menu = menu;
@@ -240,7 +243,7 @@ function wireWindow(win) {
 
   win.on('close', function () {
     // 不调 this.close(true) 即取消关闭。
-    if (settings.closeToMinimize) {
+    if (settings.closeToTray) {
       win.hide();
       setMinimized(true);
       return;

@@ -9,7 +9,8 @@
   LaunchAgent，Windows 用任务计划程序），服务最终通过 `dsvm` 启动，因此切换版本
   后不需要重新编辑 unit。
 - `dsvm` / `dsvm open` 直接打开正在运行实例的带 token URL。
-- `dsvm desktop` 在自带 NW.js 桌面应用里打开 Web UI。
+- `dsvm desktop` 在自带 NW.js 桌面应用里打开 Web UI；`dsvm --default-desktop`
+  可让裸 `dsvm` 默认走桌面端。
 
 ## 依赖
 
@@ -155,8 +156,9 @@ dsvm desktop update                 # 有新版 SDK 时更新
 所以要先装好并启动 service。
 应用显示连接中界面，用内嵌 `<webview>`（而非顶层跳转，这样跳转状态和重试逻辑不会丢）
 装载 dsh；窗口可见时自动重试、切回可见瞬间立刻重试一次，不可见时不重试。托盘常驻
-启用，右键菜单有最小化到托盘、轻量后台模式（持续不可见 5 秒后自动回到连接中页
-释放前端资源）、关闭时最小化三个开关（默认全关）以及退出。Linux 默认自动启用
+启用，右键菜单有最小化到托盘（仅 X11；Wayland 不投递 minimize 事件）、关闭到托盘、
+后台轻量模式（持续不可见 5 秒后自动回到连接中页释放前端资源）三个开关（默认全关）
+以及退出；Wayland 下保留后两项，因此同样能用托盘。Linux 默认自动启用
 Wayland（`--ozone-platform-hint=auto`）并支持 Wayland 输入法
 （`--enable-wayland-ime --wayland-text-input-version=3`）。窗口和托盘图标直接复用
 官方 dsh 鲸鱼标（`desktop/icon.svg/png`）。快捷方式直接启动缓存的 nw 二进制，不走
@@ -169,15 +171,22 @@ macOS 在 `~/Applications` 放最小 `.app`（默认 dock 图标，icns 为最�
 
 ```sh
 dsvm                  # 等同于 dsvm open：直接用浏览器打开
+dsvm --print          # 参数会透传：等同于 `dsvm open --print`
 dsvm open             # 打开浏览器，不输出 URL
 dsvm open --print     # 输出 URL 并打开
 dsvm service url      # 只输出 URL（脚本用途）
+
+dsvm --default-desktop   # 让裸 `dsvm` 等同 `dsvm desktop`，启动 NW.js 桌面应用
+dsvm --default-open      # 让裸 `dsvm` 恢复等同 `dsvm open`（默认）
 ```
 
 `dsvm open` 通过 `dsvm service url` 获取 URL，再调用平台打开方式（Linux 依次尝试
 `xdg-open` / `gio` / `$BROWSER`，macOS 用 `open`，Windows 用
 `rundll32 url.dll,FileProtocolHandler`）。需要同时在终端看到 URL 时加 `--print`；
 只需要 URL 时用 `dsvm service url`。服务未运行时会提示如何启动。
+
+裸 `dsvm` 默认等同 `dsvm open`；执行 `dsvm --default-desktop` 后改为等同
+`dsvm desktop`。该选择保存在 `config.json`，裸 `dsvm` 后面的参数会透传给选中的命令。
 
 ## 环境变量
 

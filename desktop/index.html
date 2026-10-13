@@ -68,7 +68,7 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
 
     const RETRY_MS = 3000;          // 可见时连接失败的重试间隔
     const LOAD_TIMEOUT_MS = 10000;  // webview 置 src 后等待装载的超时（loadabort 会更快给出失败）
-    const HIDE_UNLOAD_MS = 5_000;   // 轻量后台模式：持续不可见多久后卸载 dsh 释放资源
+    const HIDE_UNLOAD_MS = 5_000;   // 后台轻量模式：持续不可见多久后卸载 dsh 释放资源
 
     const view = document.getElementById('view');
     const overlay = document.getElementById('overlay');
@@ -168,7 +168,7 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     }
 
     async function connect() {
-      // 不可见时不重试：只记录不可见起始时间，轻量后台模式靠它计时。
+      // 不可见时不重试：只记录不可见起始时间，后台轻量模式靠它计时。
       if (document.visibilityState !== 'visible') {
         if (hiddenSince === null) hiddenSince = Date.now();
         scheduleRetry();
@@ -229,7 +229,7 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       retryTimer = setTimeout(connect, state === 'ready' ? 15000 : RETRY_MS);
     }
 
-    /** 轻量后台模式：持续不可见超阈值后卸载 webview，回到连接中页释放前端资源。 */
+    /** 后台轻量模式：持续不可见超阈值后卸载 webview，回到连接中页释放前端资源。 */
     function maybeUnloadForLightweight() {
       if (!isHiddenNow()) return;
       if (hiddenSince === null) hiddenSince = Date.now();
@@ -246,7 +246,7 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
       try {
         if (typeof view.terminate === 'function') view.terminate();
       } catch { /* ignore */ }
-      setState('connecting', '轻量后台模式：页面已卸载以节省资源，切回窗口自动恢复。');
+      setState('connecting', '后台轻量模式：页面已卸载以节省资源，切回窗口自动恢复。');
     }
 
     // webview 装载成功：当前导航已 commit 即算就绪。

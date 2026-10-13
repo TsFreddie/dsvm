@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describeCurrent } from './config.js';
+import { defaultCommand, describeCurrent, setDefaultCommand, type DefaultCommand } from './config.js';
 import { desktopCommand, desktopHelpText } from './desktop/index.js';
 import { openCommand } from './open.js';
 import { pluginCommand } from './plugin.js';
@@ -171,10 +171,28 @@ async function openCli(args: string[]): Promise<void> {
   await openCommand({ print: options.print === true || options.p === true });
 }
 
+const DEFAULT_FLAGS: Record<string, DefaultCommand> = {
+  '--default-open': 'open',
+  '--default-desktop': 'desktop',
+};
+
+function configureDefaultCli(command: DefaultCommand, args: string[]): void {
+  if (args.length > 0) fail(`usage: dsvm --default-${command}`);
+  setDefaultCommand(command);
+  info(`bare \`dsvm\` now behaves like \`dsvm ${command}\``);
+}
+
+/** Bare `dsvm` (and leading flags it does not own): run the configured default. */
+async function defaultCli(args: string[]): Promise<void> {
+  const command = defaultCommand();
+  return command === 'desktop' ? desktopCommand(args) : openCli(args);
+}
+
 const GENERAL_HELP = `dsvm — install, switch and serve @deepseek-ai/dsh
 
 Usage:
-  dsvm [open]                     Open the dsvm service web UI
+  dsvm [args...]                  Run the default command (open unless configured)
+  dsvm open [--print]             Open the dsvm service web UI
   dsvm install [version|tag]      Install a version or dist-tag (default: latest)
   dsvm use <version|tag>          Switch the active dsh version
   dsvm update [tag]               Update a dist-tag to its newest version
@@ -189,13 +207,18 @@ Usage:
   dsvm version                    Print the dsvm version
   dsvm help [command]             Show help
 
+Configuration:
+  dsvm --default-open             Make bare \`dsvm\` behave like \`dsvm open\` (default)
+  dsvm --default-desktop          Make bare \`dsvm\` behave like \`dsvm desktop\`
+
 Examples:
   dsvm install                    install the latest release
   dsvm use alpha                  switch to whatever the alpha tag points at
   dsvm update                     update the dist-tag that is currently in use
   dsvm service install            install the systemd/launchd/Task Scheduler unit
   dsvm service enable             start the service now and at login
-  dsvm open                       open the running service in a browser`;
+  dsvm open                       open the running service in a browser
+  dsvm --default-desktop          launch the desktop app from bare \`dsvm\``;
 
 const COMMAND_HELP: Record<string, string> = {
   install: 'Usage: dsvm install [version|tag] [--force]\n\nInstall a dsh version or dist-tag (default: latest).',
@@ -208,7 +231,7 @@ const COMMAND_HELP: Record<string, string> = {
   web: 'Usage: dsvm web [dsh web args...]\n\nRun `dsh web` in the foreground using the active version. Outside service\nmode the process is handed over to dsh; all arguments are passed through.',
   plugin:
     'Usage: dsvm plugin [dsh plugin args...]\n\nRun `dsh plugin` in the foreground using the active version. When no\n--profile is given, `--profile web` is assumed. The process is handed\nover to dsh; all arguments are passed through.',
-  open: 'Usage: dsvm [open] [--print]\n\nOpen the URL reported by `dsvm service url` in the default browser.\nWith --print the URL is printed as well. Use `dsvm service url` to print\nthe URL without opening a browser.',
+  open: 'Usage: dsvm [open] [--print]\n\nOpen the URL reported by `dsvm service url` in the default browser.\nWith --print the URL is printed as well. Use `dsvm service url` to print\nthe URL without opening a browser. A bare `dsvm` runs this command unless\n`--default-desktop` selected the desktop app instead.',
 };
 
 export function helpText(topic?: string): string {
@@ -220,8 +243,14 @@ export function helpText(topic?: string): string {
 
 export async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
+  const configure = command === undefined ? undefined : DEFAULT_FLAGS[command];
+  if (configure) {
+    configureDefaultCli(configure, rest);
+    return;
+  }
   switch (command) {
     case undefined:
+      return defaultCli(rest);
     case 'open':
       return openCli(rest);
     case 'install':
@@ -258,6 +287,9 @@ export async function main(argv: string[]): Promise<void> {
       info(helpText(rest[0]));
       return;
     default:
+      // Flags belong to the default command (`dsvm --print`, `dsvm --ozone-...`);
+      // bare words stay errors so typos are not dispatched silently.
+      if (command.startsWith('-') && command !== '-') return defaultCli(argv);
       fail(`unknown command "${command}"\n\n${GENERAL_HELP}`);
   }
 }

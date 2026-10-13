@@ -14,11 +14,15 @@ export interface InstalledVersion {
   tag?: string | null;
 }
 
+/** What a bare `dsvm` invocation (no command) should do. */
+export type DefaultCommand = 'open' | 'desktop';
+
 export interface Config {
   schema: 1;
   current: CurrentSelection | null;
   installed: Record<string, InstalledVersion>;
   tags: Record<string, string>;
+  defaultCommand: DefaultCommand;
 }
 
 interface RawConfig {
@@ -26,6 +30,7 @@ interface RawConfig {
   current?: unknown;
   installed?: unknown;
   tags?: unknown;
+  defaultCommand?: unknown;
 }
 
 const EMPTY_CONFIG: Config = {
@@ -33,6 +38,7 @@ const EMPTY_CONFIG: Config = {
   current: null,
   installed: {},
   tags: {},
+  defaultCommand: 'open',
 };
 
 function normalizeCurrent(current: unknown): CurrentSelection | null {
@@ -60,7 +66,13 @@ export function readConfig(): Config {
       raw.tags && typeof raw.tags === 'object'
         ? (raw.tags as Record<string, string>)
         : {},
+    defaultCommand: normalizeDefaultCommand(raw.defaultCommand),
   };
+}
+
+/** Unknown or missing values keep the historical `open` behavior. */
+function normalizeDefaultCommand(value: unknown): DefaultCommand {
+  return value === 'desktop' ? 'desktop' : 'open';
 }
 
 export function writeConfig(config: Config): void {
@@ -124,4 +136,15 @@ export function describeCurrent(config: Config = readConfig()): string {
   if (!config.current) return 'none';
   const { version, kind, spec } = config.current;
   return kind === 'tag' ? `${version} (${spec})` : `${version} (pinned)`;
+}
+
+/** Command a bare `dsvm` runs (`open` unless configured otherwise). */
+export function defaultCommand(config: Config = readConfig()): DefaultCommand {
+  return config.defaultCommand;
+}
+
+export function setDefaultCommand(command: DefaultCommand): void {
+  updateConfig((config) => {
+    config.defaultCommand = command;
+  });
 }

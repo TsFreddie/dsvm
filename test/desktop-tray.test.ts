@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -16,10 +16,12 @@ export interface FakeWin {
   handlers: Record<string, () => void>;
   hidden: boolean;
   shown: boolean;
+  closeForced: boolean;
   on: (event: string, fn: () => void) => void;
   show: () => void;
   hide: () => void;
   focus: () => void;
+  close: (force?: boolean) => void;
 }
 
 function installNwStub(
@@ -67,6 +69,7 @@ function installNwStub(
           handlers: {},
           hidden: false,
           shown: false,
+          closeForced: false,
           on: (event: string, fn: () => void) => {
             win.handlers[event] = fn;
           },
@@ -77,6 +80,9 @@ function installNwStub(
             win.hidden = true;
           },
           focus: () => undefined,
+          close: (force?: boolean) => {
+            win.closeForced = force === true;
+          },
         };
         wins.push(win);
         cb(win);
@@ -152,13 +158,13 @@ test('tray checkbox clicks flip settings without native auto-toggle', () => {
     assert.equal(readSettings().minimizeToTray, false);
     assert.equal(box('最小化到托盘').checked, false);
 
-    clicks['轻量后台模式']?.();
+    clicks['后台轻量模式']?.();
     assert.equal(readSettings().lightweightMode, true);
-    assert.equal(box('轻量后台模式').checked, true);
+    assert.equal(box('后台轻量模式').checked, true);
 
-    clicks['关闭时最小化']?.();
-    assert.equal(readSettings().closeToMinimize, true);
-    assert.equal(box('关闭时最小化').checked, true);
+    clicks['关闭到托盘']?.();
+    assert.equal(readSettings().closeToTray, true);
+    assert.equal(box('关闭到托盘').checked, true);
   } finally {
     if (previous === undefined) delete process.env.DSVM_HOME;
     else process.env.DSVM_HOME = previous;
@@ -168,7 +174,7 @@ test('tray checkbox clicks flip settings without native auto-toggle', () => {
   }
 });
 
-test('tray omits minimize-dependent items on Wayland', () => {
+test('tray hides only minimize-to-tray on Wayland, keeping close-to-tray and lightweight', () => {
   const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-wayland-'));
   const previous = process.env.DSVM_HOME;
   process.env.DSVM_HOME = home;
@@ -179,17 +185,18 @@ test('tray omits minimize-dependent items on Wayland', () => {
       NW_PRE_ARGS: undefined,
     });
     const labels = collected.map((item) => item.label);
-    assert.ok(!labels.includes('最小化到托盘'), 'no minimize-to-tray on Wayland');
-    assert.ok(!labels.includes('轻量后台模式'), 'no lightweight mode on Wayland');
-    assert.ok(labels.includes('关闭时最小化'), 'close-to-minimize stays');
-    assert.ok(labels.includes('退出'), 'quit stays');
+    assert.deepEqual(
+      labels,
+      ['关闭到托盘', '后台轻量模式', '退出'],
+      'Wayland keeps close-to-tray and lightweight (tray is still reachable)',
+    );
   } finally {
     if (previous === undefined) delete process.env.DSVM_HOME;
     else process.env.DSVM_HOME = previous;
   }
 });
 
-test('tray keeps minimize-dependent items under explicit x11', () => {
+test('tray keeps all three items under explicit x11 in order', () => {
   const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-x11-'));
   const previous = process.env.DSVM_HOME;
   process.env.DSVM_HOME = home;
@@ -200,8 +207,11 @@ test('tray keeps minimize-dependent items under explicit x11', () => {
       NW_PRE_ARGS: '--ozone-platform=x11',
     });
     const labels = collected.map((item) => item.label);
-    assert.ok(labels.includes('最小化到托盘'), 'explicit x11 keeps the item');
-    assert.ok(labels.includes('轻量后台模式'), 'explicit x11 keeps the item');
+    assert.deepEqual(
+      labels,
+      ['最小化到托盘', '关闭到托盘', '后台轻量模式', '退出'],
+      'explicit x11 keeps every switch',
+    );
   } finally {
     if (previous === undefined) delete process.env.DSVM_HOME;
     else process.env.DSVM_HOME = previous;
@@ -254,6 +264,72 @@ test('minimize event hides the window and publishes state when enabled', () => {
     if (prevSession === undefined) delete process.env.XDG_SESSION_TYPE;
     else process.env.XDG_SESSION_TYPE = prevSession;
     if (prevWayland !== undefined) process.env.WAYLAND_DISPLAY = prevWayland;
+  }
+});
+
+test('close-to-tray hides on Wayland and force-closes when off', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-close-'));
+  const previous = process.env.DSVM_HOME;
+  process.env.DSVM_HOME = home;
+  try {
+    const { collected, clicks, wins } = loadMainWithEnv({
+      XDG_SESSION_TYPE: 'wayland',
+      WAYLAND_DISPLAY: 'wayland-0',
+      NW_PRE_ARGS: undefined,
+    });
+    assert.equal(wins.length, 1);
+    const win = wins[0] as FakeWin;
+    const runtimeState = (): boolean =>
+      (
+        JSON.parse(
+          readFileSync(join(home, 'desktop', 'runtime-state.json'), 'utf8'),
+        ) as { minimized: boolean }
+      ).minimized;
+
+    // 默认关闭：close 直接放行（force close）
+    win.handlers['close']?.call(win);
+    assert.equal(win.closeForced, true);
+    assert.equal(win.hidden, false);
+
+    // Wayland 下“关闭到托盘”入口存在，打开后 close 改为隐藏而不是退出。
+    assert.ok(collected.some((item) => item.label === '关闭到托盘'), 'Wayland offers close-to-tray');
+    clicks['关闭到托盘']?.();
+    win.closeForced = false;
+    win.handlers['close']?.call(win);
+    assert.equal(win.hidden, true, 'close hides the window');
+    assert.equal(win.closeForced, false, 'close is cancelled');
+    assert.equal(runtimeState(), true, 'hidden state feeds lightweight mode');
+  } finally {
+    if (previous === undefined) delete process.env.DSVM_HOME;
+    else process.env.DSVM_HOME = previous;
+  }
+});
+
+test('legacy closeToMinimize setting migrates to closeToTray', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-migrate-'));
+  const previous = process.env.DSVM_HOME;
+  process.env.DSVM_HOME = home;
+  mkdirSync(join(home, 'desktop'), { recursive: true });
+  writeFileSync(join(home, 'desktop', 'settings.json'), `${JSON.stringify({ closeToMinimize: true })}\n`);
+  try {
+    const { collected, clicks } = loadMainWithEnv({
+      XDG_SESSION_TYPE: 'x11',
+      WAYLAND_DISPLAY: undefined,
+      NW_PRE_ARGS: undefined,
+    });
+    const closeItem = collected.find((item) => item.label === '关闭到托盘');
+    assert.ok(closeItem, 'close-to-tray item exists');
+    assert.equal(closeItem.checked, true, 'old checked state carries over');
+
+    // 点击后落盘的是新键。
+    clicks['关闭到托盘']?.();
+    const saved = JSON.parse(readFileSync(join(home, 'desktop', 'settings.json'), 'utf8')) as {
+      closeToTray?: boolean;
+    };
+    assert.equal(saved.closeToTray, false);
+  } finally {
+    if (previous === undefined) delete process.env.DSVM_HOME;
+    else process.env.DSVM_HOME = previous;
   }
 });
 

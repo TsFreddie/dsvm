@@ -11,7 +11,8 @@ Version manager and background-service runner for [`@deepseek-ai/dsh`](https://w
   LaunchAgent on macOS, Task Scheduler task on Windows) that always starts
   through `dsvm`, so switching versions never requires editing the unit.
 - Open the running instance's authenticated URL with `dsvm` / `dsvm open`.
-- Run the web UI in a bundled NW.js desktop app with `dsvm desktop`.
+- Run the web UI in a bundled NW.js desktop app with `dsvm desktop`; a bare
+  `dsvm` can default to it via `dsvm --default-desktop`.
 
 ## Requirements
 
@@ -171,9 +172,11 @@ connecting screen, loads the dsh UI in an embedded `<webview>` (never a top-leve
 navigation, so connection state and retries survive), and retries
 automatically while its window is visible — retrying once immediately when
 the window becomes visible, never while hidden. A persistent tray icon
-stays enabled with toggles for minimize-to-tray, lightweight background
-mode (unloads the page back to the connecting screen after 5 s hidden),
-and minimize-on-close, plus quit. On Linux the app defaults to Wayland
+stays enabled with toggles for minimize-to-tray (X11 only — Wayland delivers
+no minimize events), close-to-tray, and lightweight background mode (unloads
+the page back to the connecting screen after 5 s hidden), plus quit. Under
+Wayland close-to-tray and lightweight mode remain, so the tray is reachable
+there too. On Linux the app defaults to Wayland
 (`--ozone-platform-hint=auto`) with Wayland IME support
 (`--enable-wayland-ime --wayland-text-input-version=3`). Window and tray
 icons reuse the official dsh whale mark (`desktop/icon.svg/png`).
@@ -187,9 +190,13 @@ creates Start Menu + Desktop links, macOS drops a minimal `.app` bundle in
 
 ```sh
 dsvm                  # same as dsvm open: open in the browser
+dsvm --print          # flags pass through: same as `dsvm open --print`
 dsvm open             # open in the browser, without printing the URL
 dsvm open --print     # print the URL and open it
 dsvm service url      # print the URL only, for scripts
+
+dsvm --default-desktop   # make a bare `dsvm` launch the NW.js desktop app
+dsvm --default-open      # make a bare `dsvm` open the browser again (default)
 ```
 
 `dsvm open` resolves the URL through `dsvm service url` and launches the
@@ -197,6 +204,10 @@ platform opener (`xdg-open`/`gio`/`$BROWSER` on Linux, `open` on macOS,
 `rundll32 url.dll,FileProtocolHandler` on Windows). Use `--print` when you also
 want the URL on stdout; use `dsvm service url` when you only need the URL. If
 the service is not running, dsvm tells you how to start it.
+
+A bare `dsvm` is the same as `dsvm open` unless `dsvm --default-desktop` made it
+the same as `dsvm desktop`. The choice is stored in `config.json` and any
+arguments after a bare `dsvm` are passed through to the selected command.
 
 ## Environment variables
 

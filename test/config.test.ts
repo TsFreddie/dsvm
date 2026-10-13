@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  defaultCommand,
   describeCurrent,
   readConfig,
+  setDefaultCommand,
   updateConfig,
   withLock,
   writeConfig,
@@ -24,7 +26,13 @@ function useHome(t: { after: (fn: () => void) => void }): string {
 test('readConfig returns defaults when no config exists', (t) => {
   useHome(t);
   const config = readConfig();
-  assert.deepEqual(config, { schema: 1, current: null, installed: {}, tags: {} });
+  assert.deepEqual(config, {
+    schema: 1,
+    current: null,
+    installed: {},
+    tags: {},
+    defaultCommand: 'open',
+  });
 });
 
 test('config round-trips and normalizes the current selection', (t) => {
@@ -34,6 +42,7 @@ test('config round-trips and normalizes the current selection', (t) => {
     current: { kind: 'tag', spec: 'alpha', version: '1.2.3-alpha.1' },
     installed: { '1.2.3-alpha.1': { installedAt: '2025-01-01T00:00:00.000Z', tag: 'alpha' } },
     tags: { alpha: '1.2.3-alpha.1' },
+    defaultCommand: 'open',
   });
   const config = readConfig();
   assert.equal(config.current?.kind, 'tag');
@@ -41,6 +50,20 @@ test('config round-trips and normalizes the current selection', (t) => {
   assert.equal(config.tags.alpha, '1.2.3-alpha.1');
   assert.ok(home.endsWith('config') === false);
   assert.equal(describeCurrent(config), '1.2.3-alpha.1 (alpha)');
+});
+
+test('defaultCommand falls back to open and round-trips desktop', (t) => {
+  useHome(t);
+  writeConfig({ schema: 1, current: null, installed: {}, tags: {}, defaultCommand: 'open' });
+  assert.equal(readConfig().defaultCommand, 'open');
+
+  setDefaultCommand('desktop');
+  assert.equal(readConfig().defaultCommand, 'desktop');
+  assert.equal(defaultCommand(), 'desktop');
+
+  setDefaultCommand('open');
+  assert.equal(readConfig().defaultCommand, 'open');
+  assert.equal(defaultCommand(), 'open');
 });
 
 test('updateConfig mutates in place', (t) => {

@@ -65,6 +65,7 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     const os = require('os');
     const path = require('path');
     const openExternalUrl = require('./open-external.js');
+    const { createPopupLogin } = require('./popup-login.js');
 
     const RETRY_MS = 3000;          // 可见时连接失败的重试间隔
     const LOAD_TIMEOUT_MS = 10000;  // webview 置 src 后等待装载的超时（loadabort 会更快给出失败）
@@ -281,17 +282,33 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
 
     // dsh 里 target=_blank 的外链：不让它在应用里另开窗口，转系统浏览器。
     // 注意：Chrome webview 的正确拦截是 e.window.discard()，preventDefault 无效。
-    view.addEventListener('newwindow', (event) => {
-      try {
-        if (event.window && typeof event.window.discard === 'function') {
-          event.window.discard();
-        }
-      } catch (err) {
-        console.error(`dsvm desktop: cannot discard popup: ${err.message}`);
-      }
-      const target = event.targetUrl;
-      if (target) openExternalUrl(target);
+    // “登录”是特例：dsh 先 window.open('about:blank') 预开窗口，然后把该窗口
+    // 导到平台授权页；直接 discard 会让登录退化成“复制链接”，而把 about:blank
+    // 交给系统浏览器又会触发 KIO 的“Could not read file about:blank”。
+    // popup-login.js 会跟踪预开窗口的首次真实导航，等授权 URL 出现再转交。
+    const popupLogin = createPopupLogin({
+      openExternalUrl,
+      log: (message) => console.error(`dsvm desktop: ${message}`),
+      createHost() {
+        const webview = document.createElement('webview');
+        // 非 persist 分区：宿主只用来捕获跳转 URL，不落盘授权页 cookie。
+        webview.setAttribute('partition', 'dsvm-login');
+        webview.style.cssText =
+          'position:fixed;top:0;left:-10000px;width:1px;height:1px;visibility:hidden;';
+        document.body.appendChild(webview);
+        return {
+          webview,
+          dismiss() {
+            try { webview.stop(); } catch { /* ignore */ }
+            try { webview.remove(); } catch { /* ignore */ }
+          },
+        };
+      },
     });
+    view.addEventListener('newwindow', (event) => {
+      popupLogin.handleNewWindow(event);
+    });
+    window.addEventListener('unload', () => popupLogin.dispose());
 
     // 权限请求：只放行通知，其余拒绝（dsh 目前不需要定位/媒体等）。
     view.addEventListener('permissionrequest', (event) => {

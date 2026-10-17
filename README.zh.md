@@ -166,6 +166,9 @@ dsvm（避免 Linux 图标归属问题）：Linux 写
 `~/.local/share/applications/dsvm-desktop.desktop`，Windows 建开始菜单 + 桌面图标，
 macOS 在 `~/Applications` 放最小 `.app`（默认 dock 图标，icns 为最佳努力）。
 快捷方式走稳定路径（`~/.dsvm/desktop/nwjs/current/`），更新不断。
+应用内 `target=_blank` 外链（含“意见反馈”）一律转系统浏览器；dsh 的“登录”会
+先开 `about:blank` 预开窗口、之后才把它导到平台授权页，这个预开窗口由应用跟踪，
+等到真实授权 URL 出现才转交，因此不会把 `about:blank` 丢给系统浏览器。
 
 ### 打开
 

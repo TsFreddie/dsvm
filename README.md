@@ -184,7 +184,11 @@ Shortcuts launch the cached nw.js binary directly, never through dsvm, via a
 stable path (`~/.dsvm/desktop/nwjs/current/`) that survives updates:
 Linux writes `~/.local/share/applications/dsvm-desktop.desktop`, Windows
 creates Start Menu + Desktop links, macOS drops a minimal `.app` bundle in
-`~/Applications` (default dock icon; custom icns is best-effort).
+`~/Applications` (default dock icon; custom icns is best-effort). In-app
+`target=_blank` links (feedback included) go to the system browser. dsh's
+"login" pre-opens an `about:blank` popup and only later points it at the
+platform authorization page; the app follows that pre-opened popup so the
+real URL is handed over instead of `about:blank`.
 
 ### Opening
 

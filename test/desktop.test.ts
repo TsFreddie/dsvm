@@ -147,16 +147,41 @@ test('bundled desktop app uses webview with sane defaults', () => {
   assert.match(html, /HIDE_UNLOAD_MS = 5_000/);
   assert.ok(html.includes('loadabort'), 'handles webview load failures');
   assert.ok(html.includes('newwindow'), 'routes popups to the system browser');
+  assert.ok(html.includes('permissionrequest'), 'handles webview permission requests');
+  assert.ok(html.includes('event.request.allow()'), 'grants webview permissions (microphone etc.)');
+  assert.ok(
+    !html.includes('event.request.deny()'),
+    'does not blanket-deny permissions: nw denies guest requests by default, so an explicit allow is required',
+  );
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
     main?: string;
     window?: { title?: string };
     ['chromium-args']?: string;
+    content_capabilities?: { matches?: unknown; permissions?: unknown };
   };
   assert.equal(manifest.main, 'main.js');
   assert.equal(manifest.window?.title, 'DeepSeek Harness (dsvm)');
   assert.match(manifest['chromium-args'] ?? '', /--ozone-platform-hint=auto/);
   assert.match(manifest['chromium-args'] ?? '', /--enable-wayland-ime/);
   assert.match(manifest['chromium-args'] ?? '', /--wayland-text-input-version=3/);
+  // 剪贴板走 content_capabilities（PermissionController 的剪贴板授权只认这条路），
+  // 而该机制只在 --test-type 下接受 http 匹配，本机 dsh 恰好是 http。
+  assert.match(manifest['chromium-args'] ?? '', /--test-type/);
+  assert.deepEqual(manifest.content_capabilities?.permissions, [
+    'clipboardRead',
+    'clipboardWrite',
+    'unlimitedStorage',
+  ]);
+  const matches = manifest.content_capabilities?.matches;
+  assert.ok(Array.isArray(matches), 'declares content_capabilities matches');
+  for (const origin of [
+    'http://127.0.0.1/*',
+    'http://localhost/*',
+    'http://[::1]/*',
+    'https://127.0.0.1/*',
+  ]) {
+    assert.ok(matches.includes(origin), `grants web capabilities to ${origin}`);
+  }
 });
 
 test('lightweight mode follows minimize state via runtime-state.json', () => {

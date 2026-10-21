@@ -13,7 +13,20 @@
     "show_in_taskbar": true,
     "show": true
   },
-  "chromium-args": "--ozone-platform-hint=auto --enable-features=UseOzonePlatform,WaylandWindowDecorations --enable-wayland-ime --wayland-text-input-version=3",
+  "content_capabilities": {
+    "matches": [
+      "http://127.0.0.1/*",
+      "http://localhost/*",
+      "http://[::1]/*",
+      "http://0.0.0.0/*",
+      "http://[::]/*",
+      "https://127.0.0.1/*",
+      "https://localhost/*",
+      "https://[::1]/*"
+    ],
+    "permissions": ["clipboardRead", "clipboardWrite", "unlimitedStorage"]
+  },
+  "chromium-args": "--test-type --ozone-platform-hint=auto --enable-features=UseOzonePlatform,WaylandWindowDecorations --enable-wayland-ime --wayland-text-input-version=3",
   "nodejs": true,
   "single-instance": true
 }

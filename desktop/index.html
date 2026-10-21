@@ -310,11 +310,20 @@ dsvm service url       # 启动成功后输出带 token 的访问地址</pre>
     });
     window.addEventListener('unload', () => popupLogin.dispose());
 
-    // 权限请求：只放行通知，其余拒绝（dsh 目前不需要定位/媒体等）。
+    // 权限请求：一律放行（麦克风/摄像头 `media`、定位、指针锁定、下载……）。
+    // 必须显式 allow：webview 的 guest 在 nw 里默认走 deny（不加监听器时
+    // getUserMedia 直接 NotAllowedError，实测确认），而不是像顶层窗口那样自动同意。
+    // 这不涉及 webview 的 node 权限：guest 继续不带 Node，只是把浏览器的权限门打开；
+    // 应用只装载本机 dsvm 服务的页面，放行范围可控。
+    //
+    // 剪贴板例外：Chromium 的 async clipboard 走 PermissionController，nw 没有
+    // 给 webview guest 实现 delegate，所以既不弹 permissionrequest 也拿不到授权。
+    // 读写剪贴板、unlimitedStorage 由 package.json 的 content_capabilities 授予
+    // （Chromium 给网页内容授权用的官方机制）；该机制默认只接受 https 匹配，
+    // 本机 dsh 是 http，所以 chromium-args 里带了 --test-type 以放开 http 匹配。
     view.addEventListener('permissionrequest', (event) => {
       try {
-        if (event.permission === 'notifications') event.request.allow();
-        else event.request.deny();
+        event.request.allow();
       } catch { /* ignore */ }
     });
 

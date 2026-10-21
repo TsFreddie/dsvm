@@ -171,7 +171,15 @@ so the service must be installed and running first. The app shows a
 connecting screen, loads the dsh UI in an embedded `<webview>` (never a top-level
 navigation, so connection state and retries survive), and retries
 automatically while its window is visible — retrying once immediately when
-the window becomes visible, never while hidden. A persistent tray icon
+the window becomes visible, never while hidden. The webview auto-allows
+permission requests (microphone/camera `media`, geolocation, pointer lock, …)
+so voice input and similar features work, and `content_capabilities` grants
+clipboard read/write and unlimited storage to the loopback dsh origin — the
+only Chromium mechanism that lifts the clipboard permission for a webview
+guest. It needs `--test-type` because dsh is served over plain http. The
+guest still runs without Node and only the local dsh URL is loaded. A custom
+`dsvm service install --host` outside loopback is not covered by those
+matches, so clipboard writes stay blocked there. A persistent tray icon
 stays enabled with toggles for minimize-to-tray (X11 only — Wayland delivers
 no minimize events), close-to-tray, and lightweight background mode (unloads
 the page back to the connecting screen after 5 s hidden), plus quit. Under

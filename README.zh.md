@@ -155,7 +155,13 @@ dsvm desktop update                 # 有新版 SDK 时更新
 “DeepSeek Harness (dsvm)”，永远用 SDK variant，缓存在 `~/.dsvm/desktop/nwjs/`），
 所以要先装好并启动 service。
 应用显示连接中界面，用内嵌 `<webview>`（而非顶层跳转，这样跳转状态和重试逻辑不会丢）
-装载 dsh；窗口可见时自动重试、切回可见瞬间立刻重试一次，不可见时不重试。托盘常驻
+装载 dsh；窗口可见时自动重试、切回可见瞬间立刻重试一次，不可见时不重试。webview 的
+权限请求（麦克风/摄像头 `media`、定位、指针锁定等）默认全部放行，语音输入一类功能因此
+可用；剪贴板读写和 unlimitedStorage 则用 `content_capabilities` 授予本机回环地址——
+这是 Chromium 里唯一能给 webview guest 放开剪贴板权限的机制。因为 dsh 是明文 http，
+还需要 `--test-type` 才能让该机制接受 http 匹配。guest 仍然不带 Node，也只装载本机
+dsh 地址。若用 `dsvm service install --host` 把服务装到非回环地址，就不在这些匹配里，
+剪贴板写入仍会被拒绝。托盘常驻
 启用，右键菜单有最小化到托盘（仅 X11；Wayland 不投递 minimize 事件）、关闭到托盘、
 后台轻量模式（持续不可见 5 秒后自动回到连接中页释放前端资源）三个开关（默认全关）
 以及退出；Wayland 下保留后两项，因此同样能用托盘。Linux 默认自动启用

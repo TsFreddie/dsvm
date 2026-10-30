@@ -3,6 +3,8 @@
 [`@deepseek-ai/dsh`](https://www.npmjs.com/package/@deepseek-ai/dsh) 的版本管理与后台服务工具。
 
 - 安装、切换 dsh 版本或 dist-tag（`latest`、`next`、`alpha` 等）。
+- 用 `dsvm link` 在 dsvm 旁边创建指向当前版本的 `dsh` 命令；dsvm 切换或
+  更新当前版本时会自动同步。
 - `dsvm web` 以前台方式运行 Web UI，并把进程直接交给当前版本的 `dsh web`。
 - `dsvm plugin` 管理插件，并把进程直接交给当前版本的 `dsh plugin`。
 - 把 Web UI 安装为开机/登录服务（Linux 用 systemd user unit，macOS 用 launchd
@@ -30,7 +32,7 @@ dsvm 的状态都放在 `~/.dsvm`（可用 `DSVM_HOME` 覆盖）：
 
 ```
 ~/.dsvm/
-├── config.json                      # 当前版本 + dist-tag 记录
+├── config.json                      # 当前版本、dist-tag 记录和 dsh 链接路径
 ├── cache/packument.json             # npm 元数据缓存（离线兜底）
 ├── versions/<version>/              # 每个版本一份独立的 @deepseek-ai/dsh 安装
 └── service/
@@ -42,6 +44,7 @@ dsvm 的状态都放在 `~/.dsvm`（可用 `DSVM_HOME` 覆盖）：
 
 ```sh
 dsvm install            # 安装 latest 并切换过去
+dsvm link               # 在 PATH 中 dsvm 旁边添加 `dsh` 命令
 dsvm service install    # 注册服务定义（默认端口 7766）
 dsvm service enable     # 立即启动，并设置登录自启
 dsvm open               # 用浏览器打开正在运行的实例
@@ -59,6 +62,7 @@ dsvm open               # 用浏览器打开正在运行的实例
 | `dsvm list [--json]` | 列出已安装版本、指向它们的 dist-tag、安装时间，以及当前版本。`--json` 额外返回每个版本的 `installedAt` 与 `tags`。 |
 | `dsvm uninstall <version\|tag>` | 卸载某个版本；当前正在使用的版本不能卸载。 |
 | `dsvm current [--json]` | 显示当前选择（`1.2.3 (alpha)` 或 `1.2.3 (pinned)`）。 |
+| `dsvm link [--force]` | 在 PATH 中 dsvm 命令旁边创建指向当前版本的 `dsh` 命令；切换版本时自动更新。 |
 
 tag 解析优先访问 npm registry，不可达时退回 `config.json` 里最后一次的记录；
 `dsvm update` 始终要求访问 registry，避免把过期缓存当成 "已是最新"。
@@ -78,6 +82,20 @@ installed in /home/me/.dsvm/versions
 
 current: 0.2.1-alpha.2 (alpha)
 ```
+
+### 链接 dsh
+
+```sh
+dsvm link              # 在 PATH 中 dsvm 命令旁边创建 dsh
+dsvm link --force      # 覆盖一个已有的、与 dsvm 无关的 dsh 文件
+```
+
+`dsvm link` 会在 `dsvm` 可执行文件所在目录创建 `dsh`（Unix 为 `${dir}/dsh`，
+Windows 为 `${dir}/dsh.cmd`），直接指向当前版本 dsh 的入口脚本，并打印出路径。
+如果 `dsvm` 在 PATH 里，那么 `dsh` 也在——两个命令共享同一个当前版本。
+`dsvm install`、`dsvm use` 或 `dsvm update` 改变当前版本时，链接会自动重新指向。
+如果手动删除了这个链接，dsvm 会忘记它而不会悄悄重建；需要时重新执行
+`dsvm link` 即可。
 
 ### 运行 Web UI
 

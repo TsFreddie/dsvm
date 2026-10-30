@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { defaultCommand, describeCurrent, setDefaultCommand, type DefaultCommand } from './config.js';
 import { desktopCommand, desktopHelpText } from './desktop/index.js';
+import { linkCommand } from './link.js';
 import { openCommand } from './open.js';
 import { pluginCommand } from './plugin.js';
 import { versionsDir } from './paths.js';
 import { serviceCommand, serviceHelpText } from './service/index.js';
 import { dim, fail, formatTimestamp, info } from './util.js';
 import {
+  activeDsh,
   installCommand,
   listState,
   uninstallCommand,
@@ -94,6 +96,11 @@ async function uninstallCli(args: string[]): Promise<void> {
   const target = positional[0];
   if (!target) fail('usage: dsvm uninstall <version|tag>');
   await uninstallCommand(target);
+}
+
+async function linkCli(args: string[]): Promise<void> {
+  const { version, bin } = activeDsh();
+  await linkCommand(args, { version, bin });
 }
 
 function tagsFor(state: ReturnType<typeof listState>, version: string): string[] {
@@ -199,6 +206,7 @@ Usage:
   dsvm list [--json]              List installed versions and tagged releases
   dsvm uninstall <version|tag>    Remove an installed version
   dsvm current [--json]           Print the active version
+  dsvm link [--force]             Link \`dsh\` beside dsvm to the active version
   dsvm web [dsh args...]          Run \`dsh web\` in the foreground (handed off to dsh)
   dsvm plugin [dsh args...]       Run \`dsh plugin\` (default --profile web)
   dsvm desktop [install|uninstall|update|nw-args...]
@@ -215,6 +223,7 @@ Examples:
   dsvm install                    install the latest release
   dsvm use alpha                  switch to whatever the alpha tag points at
   dsvm update                     update the dist-tag that is currently in use
+  dsvm link                       make \`dsh\` available beside dsvm in PATH
   dsvm service install            install the systemd/launchd/Task Scheduler unit
   dsvm service enable             start the service now and at login
   dsvm open                       open the running service in a browser
@@ -228,6 +237,8 @@ const COMMAND_HELP: Record<string, string> = {
   uninstall: 'Usage: dsvm uninstall <version|tag>\n\nRemove an installed version that is not active.',
   list: 'Usage: dsvm list [--json]\n\nList installed versions and the dist-tags pointing at them.',
   current: 'Usage: dsvm current [--json]\n\nPrint the active dsh version.',
+  link:
+    'Usage: dsvm link [--force]\n\nCreate a `dsh` command next to the dsvm command found in PATH, pointing at\nthe active dsh version. The link is re-pointed automatically whenever dsvm\nswitches or updates the active version. Use --force to replace an existing\nunmanaged `dsh` file.',
   web: 'Usage: dsvm web [dsh web args...]\n\nRun `dsh web` in the foreground using the active version. Outside service\nmode the process is handed over to dsh; all arguments are passed through.',
   plugin:
     'Usage: dsvm plugin [dsh plugin args...]\n\nRun `dsh plugin` in the foreground using the active version. When no\n--profile is given, `--profile web` is assumed. The process is handed\nover to dsh; all arguments are passed through.',
@@ -268,6 +279,8 @@ export async function main(argv: string[]): Promise<void> {
     case 'current':
       currentCli(rest);
       return;
+    case 'link':
+      return linkCli(rest);
     case 'web':
       return webCommand(rest);
     case 'plugin':

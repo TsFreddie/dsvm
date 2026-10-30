@@ -17,12 +17,19 @@ export interface InstalledVersion {
 /** What a bare `dsvm` invocation (no command) should do. */
 export type DefaultCommand = 'open' | 'desktop';
 
+/** The `dsh` link created by `dsvm link`; re-pointed on version switches. */
+export interface LinkConfig {
+  path: string;
+  kind: 'symlink' | 'cmd';
+}
+
 export interface Config {
   schema: 1;
   current: CurrentSelection | null;
   installed: Record<string, InstalledVersion>;
   tags: Record<string, string>;
   defaultCommand: DefaultCommand;
+  link?: LinkConfig;
 }
 
 interface RawConfig {
@@ -31,6 +38,7 @@ interface RawConfig {
   installed?: unknown;
   tags?: unknown;
   defaultCommand?: unknown;
+  link?: unknown;
 }
 
 const EMPTY_CONFIG: Config = {
@@ -55,7 +63,7 @@ function normalizeCurrent(current: unknown): CurrentSelection | null {
 export function readConfig(): Config {
   const raw = readJson<RawConfig | null>(configFile(), null);
   if (!raw || typeof raw !== 'object') return structuredClone(EMPTY_CONFIG);
-  return {
+  const config: Config = {
     schema: 1,
     current: normalizeCurrent(raw.current),
     installed:
@@ -68,11 +76,24 @@ export function readConfig(): Config {
         : {},
     defaultCommand: normalizeDefaultCommand(raw.defaultCommand),
   };
+  const link = normalizeLink(raw.link);
+  if (link) config.link = link;
+  return config;
 }
 
 /** Unknown or missing values keep the historical `open` behavior. */
 function normalizeDefaultCommand(value: unknown): DefaultCommand {
   return value === 'desktop' ? 'desktop' : 'open';
+}
+
+function normalizeLink(value: unknown): LinkConfig | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.path !== 'string' || candidate.path === '') return null;
+  return {
+    path: candidate.path,
+    kind: candidate.kind === 'cmd' ? 'cmd' : 'symlink',
+  };
 }
 
 export function writeConfig(config: Config): void {

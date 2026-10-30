@@ -74,7 +74,8 @@ export function setCurrent(home: string, version = '9.9.9'): void {
   });
 }
 
-const FAKE_DSH_SCRIPT = `console.log('fake dsh argv: ' + process.argv.slice(2).join(' '));
+const FAKE_DSH_SCRIPT = `#!/usr/bin/env node
+console.log('fake dsh argv: ' + process.argv.slice(2).join(' '));
 if (process.env.FAKE_DSH_URL) console.log('dsh web: ' + process.env.FAKE_DSH_URL);
 if (process.env.FAKE_DSH_HOLD === '1') {
   setInterval(() => {}, 1000);
@@ -91,7 +92,7 @@ export function addFakeDsh(home: string, version = '9.9.9'): string {
   const libDir = join(dshDir, 'lib');
   mkdirSync(libDir, { recursive: true });
   const bin = join(libDir, 'bin.js');
-  writeFileSync(bin, FAKE_DSH_SCRIPT);
+  writeFileSync(bin, FAKE_DSH_SCRIPT, { mode: 0o755 });
   writeFileSync(
     join(dshDir, 'package.json'),
     `${JSON.stringify({ name: '@deepseek-ai/dsh', version }, null, 2)}\n`,

@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { readConfig, updateConfig, withLock } from './config.js';
 import type { Config, CurrentSelection } from './config.js';
+import { syncLinkIfConfigured } from './link.js';
 import { dshBin, versionDir, versionsDir } from './paths.js';
 import { PACKAGE_NAME, registryUrl, resolveSpec } from './registry.js';
 import type { ResolvedSpec } from './registry.js';
@@ -205,6 +206,7 @@ export async function installCommand(
     }
     if (switched) {
       info(`now using dsh ${resolved.version}${label}`);
+      syncLinkIfConfigured();
       await hintServiceRestart();
     }
     return resolved;
@@ -237,7 +239,10 @@ export async function useCommand(spec: string): Promise<ResolvedSpec> {
     const label = resolved.tag ? ` (${resolved.tag})` : '';
     if (changed) info(`now using dsh ${resolved.version}${label}`);
     else info(`already using dsh ${resolved.version}${label}`);
-    if (changed) await hintServiceRestart();
+    if (changed) {
+      syncLinkIfConfigured();
+      await hintServiceRestart();
+    }
     return resolved;
   });
 }
@@ -276,6 +281,7 @@ export async function updateCommand(requestedTag?: string): Promise<ResolvedSpec
     }
     if (switched) {
       info(`now using dsh ${resolved.version} (${tag})`);
+      syncLinkIfConfigured();
       await hintServiceRestart();
     }
     return resolved;

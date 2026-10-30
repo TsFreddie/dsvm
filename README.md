@@ -3,6 +3,8 @@
 Version manager and background-service runner for [`@deepseek-ai/dsh`](https://www.npmjs.com/package/@deepseek-ai/dsh).
 
 - Install and switch dsh versions or dist-tags (`latest`, `next`, `alpha`, ...).
+- Link the active version as `dsh` next to the `dsvm` command with `dsvm link`,
+  automatically kept in sync when dsvm switches or updates the active version.
 - Run the web UI in the foreground with `dsvm web`, which hands the process over
   to the active version of `dsh web`.
 - Manage plugins with `dsvm plugin`, which hands the process over to the
@@ -32,7 +34,7 @@ Everything dsvm manages lives in `~/.dsvm` (override with `DSVM_HOME`):
 
 ```
 ~/.dsvm/
-├── config.json                      # active version + dist-tag memory
+├── config.json                      # active version, tags, and dsh link path
 ├── cache/packument.json             # npm metadata cache (offline fallback)
 ├── versions/<version>/              # one npm install of @deepseek-ai/dsh each
 └── service/
@@ -44,6 +46,7 @@ Everything dsvm manages lives in `~/.dsvm` (override with `DSVM_HOME`):
 
 ```sh
 dsvm install            # install the latest dist-tag and use it
+dsvm link               # add a `dsh` command next to dsvm in PATH
 dsvm service install    # register the service definition (default port 7766)
 dsvm service enable     # start now and at login
 dsvm open               # open the running instance in the browser
@@ -61,6 +64,7 @@ dsvm open               # open the running instance in the browser
 | `dsvm list [--json]` | List installed versions with the dist-tags pointing at them, install time, and the active one. `--json` also returns per-version `installedAt` and `tags`. |
 | `dsvm uninstall <version\|tag>` | Remove an installed version. The active version cannot be removed. |
 | `dsvm current [--json]` | Print the active selection (`1.2.3 (alpha)` or `1.2.3 (pinned)`). |
+| `dsvm link [--force]` | Create a `dsh` command next to the dsvm command in PATH, pointing at the active version. The link is updated automatically on version switches. |
 
 Dist-tag resolution uses the npm registry and falls back to the last known
 mapping in `config.json` when the registry is unreachable. `dsvm update` always
@@ -83,6 +87,21 @@ installed in /home/me/.dsvm/versions
 
 current: 0.2.1-alpha.2 (alpha)
 ```
+
+### Linking dsh
+
+```sh
+dsvm link              # link dsh beside the dsvm command found in PATH
+dsvm link --force      # replace an existing unrelated dsh file
+```
+
+`dsvm link` creates `dsh` in the same directory as the `dsvm` executable
+(`${dir}/dsh` on Unix, `${dir}/dsh.cmd` on Windows), pointing directly at the
+active version's dsh entry script, and prints the resulting path. If `dsvm` is
+on your PATH, so is `dsh`: the two commands then share the same active version.
+The link is re-pointed automatically whenever `dsvm install`, `dsvm use`, or
+`dsvm update` changes the active version. If you delete the link, dsvm forgets
+it instead of recreating it; run `dsvm link` again to restore it.
 
 ### Running the web UI
 

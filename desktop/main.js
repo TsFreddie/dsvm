@@ -49,10 +49,14 @@ function saveSettings(settings) {
 
 const settings = loadSettings();
 
-// 最小化状态：唯一事实源。OS 最小化走 minimize/restore 事件；
+// 窗口可见状态（最小化或被 hide 到托盘）：写 runtime-state.json 供 index.html
+// 轮询（轻量模式的卸载依据）。OS 最小化走 minimize/restore 事件；
 // 程序 hide()/show()（托盘/关闭逻辑）没有对应事件，调用处手动同步。
-// 写 runtime-state.json 供 index.html 轮询（轻量模式的卸载依据）。
 let minimized = false;
+
+// 真正的 OS 最小化状态。hide() 到托盘也会把上面的 minimized 置 true，所以不能拿它
+// 判断是否需要 restore()：对没有最小化的窗口调用 restore() 会把最大化状态一并还原。
+let osMinimized = false;
 
 function runtimeStateFile() {
   return path.join(dsvmHome(), 'desktop', 'runtime-state.json');
@@ -206,18 +210,41 @@ function buildTray() {
   // 左键点击托盘：显示并聚焦主窗口（右键弹出上面的菜单）。
   tray.on('click', () => {
     if (mainWin !== null) {
-      mainWin.show();
-      setMinimized(false);
-      mainWin.focus();
+      revealMainWindow();
       return;
     }
     nw.Window.open('index.html', {}, (win) => {
       wireWindow(win);
-      win.show();
-      setMinimized(false);
-      win.focus();
+      revealMainWindow();
     });
   });
+}
+
+/**
+ * 把主窗口从后台带到前台。托盘点击和“应用被重复启动”共用这条路径，
+ * 覆盖隐藏到托盘、OS 最小化、被其他窗口挡住这三种情况。
+ * 顺序有讲究：最小化时 show() 不会解除最小化，所以先 restore()；最后再 focus()。
+ */
+function revealMainWindow() {
+  const win = mainWin;
+  if (win === null) return;
+  if (osMinimized) {
+    // 立刻清标志：旧版 NW 会同时触发 onOpen 和 on，重复调用时不要 restore 第二次
+    // （Windows 上对刚恢复到最大化的窗口再 restore 一次会取消最大化）。
+    osMinimized = false;
+    try {
+      win.restore();
+    } catch (err) {
+      console.error(`dsvm desktop: cannot restore window: ${err.message}`);
+    }
+  }
+  try {
+    win.show();
+    setMinimized(false);
+    win.focus();
+  } catch (err) {
+    console.error(`dsvm desktop: cannot show window: ${err.message}`);
+  }
 }
 
 function wireWindow(win) {
@@ -233,11 +260,13 @@ function wireWindow(win) {
     openExternalUrl(url);
   });
   win.on('minimize', () => {
+    osMinimized = true;
     setMinimized(true);
     if (settings.minimizeToTray) win.hide();
   });
 
   win.on('restore', () => {
+    osMinimized = false;
     setMinimized(false);
   });
 
@@ -253,9 +282,30 @@ function wireWindow(win) {
 
   win.on('closed', () => {
     mainWin = null;
+    osMinimized = false;
     // 主窗口关掉后应用即退出（托盘随 background page 释放）。
     nw.App.quit();
   });
+}
+
+/**
+ * 重复启动：NW 是单实例，第二次启动会把命令行转给已运行的实例，并触发 App 的
+ * `open` 事件（macOS 点击 Dock 图标对应 `reopen`）。两者都只做一件事：
+ * 把主窗口带到前台。
+ */
+function listenForRelaunch() {
+  try {
+    // 旧版 NW（< 0.111.2）的 App.on('open') 只触发一次（nwjs/nw.js#8283），
+    // 维护者建议改用底层 onOpen 事件对象；两个入口都挂上，重复触发无副作用
+    // （revealMainWindow 里的 osMinimized 会即时清位，restore 只会执行一次）。
+    if (nw.App && nw.App.onOpen && typeof nw.App.onOpen.addListener === 'function') {
+      nw.App.onOpen.addListener(revealMainWindow);
+    }
+    nw.App.on('open', revealMainWindow);
+    nw.App.on('reopen', revealMainWindow);
+  } catch (err) {
+    console.error(`dsvm desktop: cannot listen for relaunches: ${err.message}`);
+  }
 }
 
 // 单测入口（NW 运行时忽略 exports）。
@@ -263,12 +313,12 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { detectWayland, isWaylandWindow };
 }
 
+listenForRelaunch();
 buildTray();
 // 启动即发布一次，避免上次异常退出残留的 true 误导页面。
 publishMinimized();
 
 nw.Window.open('index.html', {}, (win) => {
   wireWindow(win);
-  win.show();
-  win.focus();
+  revealMainWindow();
 });

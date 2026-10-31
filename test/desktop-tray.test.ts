@@ -12,14 +12,19 @@ interface FakeItem {
   checked: boolean;
 }
 
+type AppHandlers = Record<string, Array<(arg?: unknown) => void>>;
+
 export interface FakeWin {
   handlers: Record<string, () => void>;
   hidden: boolean;
-  shown: boolean;
+  shown: number;
+  restored: number;
+  focused: number;
   closeForced: boolean;
   on: (event: string, fn: () => void) => void;
   show: () => void;
   hide: () => void;
+  restore: () => void;
   focus: () => void;
   close: (force?: boolean) => void;
 }
@@ -28,6 +33,7 @@ function installNwStub(
   collected: FakeItem[],
   clicks: Record<string, () => void>,
   wins: FakeWin[],
+  appHandlers: AppHandlers = {},
 ): void {
   class FakeMenuItem {
     type: string;
@@ -68,18 +74,26 @@ function installNwStub(
         const win: FakeWin = {
           handlers: {},
           hidden: false,
-          shown: false,
+          shown: 0,
+          restored: 0,
+          focused: 0,
           closeForced: false,
           on: (event: string, fn: () => void) => {
             win.handlers[event] = fn;
           },
           show: () => {
-            win.shown = true;
+            win.shown += 1;
+            win.hidden = false;
           },
           hide: () => {
             win.hidden = true;
           },
-          focus: () => undefined,
+          restore: () => {
+            win.restored += 1;
+          },
+          focus: () => {
+            win.focused += 1;
+          },
           close: (force?: boolean) => {
             win.closeForced = force === true;
           },
@@ -88,7 +102,17 @@ function installNwStub(
         cb(win);
       },
     },
-    App: { quit: () => undefined },
+    App: {
+      quit: () => undefined,
+      on: (event: string, fn: (arg?: unknown) => void) => {
+        (appHandlers[event] ??= []).push(fn);
+      },
+      onOpen: {
+        addListener: (fn: (arg?: unknown) => void) => {
+          (appHandlers.open ??= []).push(fn);
+        },
+      },
+    },
     Shell: { openExternal: () => undefined },
   };
 }
@@ -258,6 +282,73 @@ test('minimize event hides the window and publishes state when enabled', () => {
     win.handlers['minimize']?.();
     assert.equal(win.hidden, true);
     assert.equal(runtimeState(), true);
+  } finally {
+    if (previous === undefined) delete process.env.DSVM_HOME;
+    else process.env.DSVM_HOME = previous;
+    if (prevSession === undefined) delete process.env.XDG_SESSION_TYPE;
+    else process.env.XDG_SESSION_TYPE = prevSession;
+    if (prevWayland !== undefined) process.env.WAYLAND_DISPLAY = prevWayland;
+  }
+});
+
+test('relaunch brings the main window back from minimize and from the tray', () => {
+  const collected: FakeItem[] = [];
+  const clicks: Record<string, () => void> = {};
+  const wins: FakeWin[] = [];
+  const appHandlers: AppHandlers = {};
+  installNwStub(collected, clicks, wins, appHandlers);
+
+  const home = mkdtempSync(join(tmpdir(), 'dsvm-tray-relaunch-'));
+  const previous = process.env.DSVM_HOME;
+  process.env.DSVM_HOME = home;
+  const prevSession = process.env.XDG_SESSION_TYPE;
+  const prevWayland = process.env.WAYLAND_DISPLAY;
+  process.env.XDG_SESSION_TYPE = 'x11';
+  delete process.env.WAYLAND_DISPLAY;
+  try {
+    const req = createRequire(import.meta.url);
+    const mainPath = join(PROJECT_ROOT, 'desktop', 'main.js');
+    delete req.cache[mainPath];
+    req(mainPath);
+    assert.equal(wins.length, 1);
+    const win = wins[0] as FakeWin;
+    const runtimeState = (): boolean =>
+      (
+        JSON.parse(
+          readFileSync(join(home, 'desktop', 'runtime-state.json'), 'utf8'),
+        ) as { minimized: boolean }
+      ).minimized;
+
+    // App.on 与兼容旧版 NW 的 onOpen 入口都要登记，reopen 供 macOS Dock 使用。
+    assert.equal(appHandlers.open?.length, 2, 'open listeners registered (on + onOpen)');
+    assert.equal(appHandlers.reopen?.length, 1, 'reopen listener registered');
+    const relaunch = (): void => {
+      for (const fn of appHandlers.open ?? []) fn();
+    };
+
+    // OS 最小化：第二次启动先 restore，再 show/focus，并清掉发布出去的状态。
+    win.handlers['minimize']?.();
+    assert.equal(runtimeState(), true);
+    relaunch();
+    assert.equal(win.restored, 1, 'restore runs once even with two open listeners');
+    assert.ok(win.shown >= 1, 'window is shown');
+    assert.ok(win.focused >= 1, 'window is focused');
+    assert.equal(runtimeState(), false);
+
+    // 关闭到托盘（没有 OS 最小化）：只 show/focus，不调用 restore，
+    // 否则会把最大化窗口还原成普通大小。
+    clicks['关闭到托盘']?.();
+    win.handlers['close']?.call(win);
+    assert.equal(win.hidden, true);
+    win.restored = 0;
+    win.shown = 0;
+    win.focused = 0;
+    relaunch();
+    assert.equal(win.restored, 0, 'restore is skipped when the window is only hidden');
+    assert.ok(win.shown >= 1, 'tray-hidden window is shown');
+    assert.ok(win.focused >= 1, 'tray-hidden window is focused');
+    assert.equal(win.hidden, false);
+    assert.equal(wins.length, 1, 'relaunch reuses the existing window');
   } finally {
     if (previous === undefined) delete process.env.DSVM_HOME;
     else process.env.DSVM_HOME = previous;

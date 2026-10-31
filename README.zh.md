@@ -182,7 +182,9 @@ dsh 地址。若用 `dsvm service install --host` 把服务装到非回环地址
 剪贴板写入仍会被拒绝。托盘常驻
 启用，右键菜单有最小化到托盘（仅 X11；Wayland 不投递 minimize 事件）、关闭到托盘、
 后台轻量模式（持续不可见 5 秒后自动回到连接中页释放前端资源）三个开关（默认全关）
-以及退出；Wayland 下保留后两项，因此同样能用托盘。Linux 默认自动启用
+以及退出；Wayland 下保留后两项，因此同样能用托盘。应用是单实例：重复启动
+（macOS 为点击 Dock 图标）不会开新窗口，而是把已有主窗口从托盘或最小化状态
+恢复到前台。Linux 默认自动启用
 Wayland（`--ozone-platform-hint=auto`）并支持 Wayland 输入法
 （`--enable-wayland-ime --wayland-text-input-version=3`）。窗口和托盘图标直接复用
 官方 dsh 鲸鱼标（`desktop/icon.svg/png`）。快捷方式直接启动缓存的 nw 二进制，不走

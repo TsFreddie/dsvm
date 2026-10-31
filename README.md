@@ -203,8 +203,10 @@ stays enabled with toggles for minimize-to-tray (X11 only — Wayland delivers
 no minimize events), close-to-tray, and lightweight background mode (unloads
 the page back to the connecting screen after 5 s hidden), plus quit. Under
 Wayland close-to-tray and lightweight mode remain, so the tray is reachable
-there too. On Linux the app defaults to Wayland
-(`--ozone-platform-hint=auto`) with Wayland IME support
+there too. The app is single-instance: launching it again (or clicking its
+Dock icon on macOS) reuses the running window and brings it back to the
+front, restoring it from the tray or from a minimized state. On Linux the
+app defaults to Wayland (`--ozone-platform-hint=auto`) with Wayland IME support
 (`--enable-wayland-ime --wayland-text-input-version=3`). Window and tray
 icons reuse the official dsh whale mark (`desktop/icon.svg/png`).
 Shortcuts launch the cached nw.js binary directly, never through dsvm, via a
